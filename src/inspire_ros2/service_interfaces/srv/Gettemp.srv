@@ -1,0 +1,7 @@
+# Request
+int16 id
+string status
+---
+# Response
+int16[6] tempvalue
+bool success

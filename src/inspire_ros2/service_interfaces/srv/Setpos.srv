@@ -1,0 +1,16 @@
+# Request
+int16 id
+string status
+int16 pos0
+int16 pos1
+int16 pos2
+int16 pos3
+int16 pos4
+int16 pos5
+
+---
+
+# Response
+bool pos_accepted
+
+

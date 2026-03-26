@@ -1,0 +1,12 @@
+# Request
+int16 id
+string status
+int16 current0
+int16 current1
+int16 current2
+int16 current3
+int16 current4
+int16 current5
+---
+# Response
+bool current_limit_accepted

@@ -1,0 +1,120 @@
+1.inspire_hand包ros2版本支持因时机器人公司的灵巧手与机械夹爪在ROS平台上的使用，我们只在ubuntu 22.04 ros2 humble版本环境下进行了测试，其他ros环境需要等待我们后续的测试。
+2.为了使程序能够正常运行，需要执行以下环境配置操作：（首次执行的需要，配置好了就不需要了）
+    1）安装ros2 humble版本环境，具体安装方式如下：
+       （1）
+       （2）安装modbus库，终端指令:sudo apt-get install libmodbus-dev
+注：如有其他依赖缺失，根据cmake编译时终端报错信息进行缺失编译项下载。
+
+    2）创建catkin工作目录
+       终端指令：mkdir -p ~/inspire_hand_ws/src
+                cd ~/inspire_hand_ws
+                colcon build
+                source install/setup.bash  (在每一个终端启动时使用，帮助你找到ROS安装目录)
+    3）将inspire_hand_ros2.zip 放到inspire_hand_ws目录下的/src文件夹下，解压
+       终端指令：cd ~/inspire_hand_ws/src
+             unzip inspire_hand_ros2
+                 将解压出的inspire_hand_modbus_ros2和service_interfaces放置到inspire_hand_ws/src，删除inspire_hand_ros2文件夹。
+                 
+    4）对安装包进行重新编译
+       终端指令：colcon build --packages-select service_interfaces
+             colcon build --packages-select inspire_hand_modbus_ros2
+注：尽量避免使用sudo gedit ~/.bashrc在bash文件中添加过多的source命令，防止环境变量冲突，尽量减少重复包名如"service_interfaces"；否则可能会导致消息格式引用错误，或导致节点启用出现错误。
+3.1 灵巧手使用
+    1）使用网线连接inspire_hand与对应主机，将ipv4修改为地址：192.168.11.222，子网掩码修改为255.255.255.0；ping 192.168.11.210后返回数据则连接成功，反之检查线路连接是否正常。
+
+    2) 开始使用inspire_hand_modbus_ros2功能包
+       注意： 需要重新打开一个新的终端，并执行终端指令： source install/setup.bash
+                                                  ros2 run inspire_hand_modbus_ros2 hand_modbus_control_node 
+ 
+	(1)设置ID------id范围1-254
+	ros2 service call /Setid service_interfaces/srv/Setid "{id: 2, status: 'set_id'}"
+
+	(2)设置波特率------参数redu_ratio范围0-4
+	ros2 service call /Setreduratio service_interfaces/Setreduratio "{redu_ratio: 0,id: 1, status: 'set_reduratio'}" 
+
+	(3)设置六个驱动器位置------参数pos范围0-2000 
+	ros2 service call /Setpos service_interfaces/srv/Setpos "{pos0: 1000,pos1: 1000,pos2: 1000,pos3: 1000,pos4: 1000,pos5: 1000,id: 1, status: 'set_pos'}"
+
+	(4)设置速度------参数speed范围0-1000
+	ros2 service call /Setspeed service_interfaces/srv/Setspeed "{speed0: 50,speed1: 50,speed2: 50,speed3: 50,speed4: 50,speed5: 50,id: 1, status: 'set_speed'}"
+
+	(5)设置灵巧手角度------参数angle范围0-1000
+	ros2 service call /Setangle service_interfaces/srv/Setangle "{angle0: 1000,angle1: 1000,angle2: 1000,angle3: 1000,angle4: 1000,angle5: 1000,id: 1, status: 'set_angle'}"
+
+	(6)设置力控阈值------参数force范围0-1000
+	ros2 service call /Setforce service_interfaces/srv/Setforce "{force0: 0,force1: 0,force2: 0,force3: 1000,force4: 0,force5: 0,id: 1, status: 'set_force'}"
+
+	(7)设置电流阈值------参数current范围0-1500
+	ros2 service call /Setcurrentlimit service_interfaces/Setcurrentlimit "{current0: 1500, current1: 1500, current2: 1500, current3: 1500, current4: 1500, current5: 1500,id: 1, status: 'set_currentlimit'}"
+
+	(8)设置上电速度------参数speed范围0-1000(断电后重新上电后执行)
+	ros2 service call /Setdefaultspeed service_interfaces/srv/Setdefaultspeed "{speed0: 1000,speed1: 1000,speed2: 1000,speed3: 1000,speed4: 1000,speed5: 100,id: 1, status: 'set_defaultspeed'}"
+
+	(9)设置上电力控阈值------参数force范围0-1000(断电后重新上电后执行)
+	ros2 service call /Setdefaultforce service_interfaces/srv/Setdefaultforce "{force0: 1000, force1: 1000, force2: 1000, force3: 1000, force4: 1000, force5: 1000}"
+
+	(10)设置上电电流阈值------参数current范围0-1500(断电后重新上电后执行)
+	ros2 service call Setdefaultcurrentlimit service_interfaces/srv/Setdefaultcurrentlimit "{current0: 1500, current1: 1500, current2: 1500, current3: 1500, current4: 1500, current5: 1500}"
+
+	(11)力传感器校准------此命令需执行两次（执行后手掌将完全张开，随后进行力校准）
+	ros2 service call /Setforceclb service_interfaces/srv/Setforceclb "{id: 1, status: 'set_forceclb'}" 
+
+	(12)灵巧手清除错误
+	ros2 service call /Setclearerror service_interfaces/srv/Setclearerror "{id: 1, status: 'set_clearerror'}" 
+
+	(13)恢复出厂设置
+	ros2 service call /Setresetpara service_interfaces/srv/Setresetpara "{id: 1, status: 'set_resetpara'}"  
+
+	(14)保存参数到FLASH
+	ros2 service call /Setsaveflash service_interfaces/srv/Setsaveflash "{id: 1, status: 'set_saveflash'}" 
+
+	(15)读取驱动器设置的位置值
+	ros2 service call /Getposset service_interfaces/srv/Getposset "{id: 1, status: 'get_posset'}" 
+
+	(16)读取设置的灵巧手角度值
+	ros2 service call /Getangleset service_interfaces/srv/Getangleset "{id: 1, status: 'get_angleset'}" 
+
+	(17)读取设置的力控阈值
+	ros2 service call /Getforceset service_interfaces/srv/Getforceset "{id: 1, status: 'get_forceset'}"
+
+	(18)读取当前电流值
+	ros2 service call /Getcurrentact service_interfaces/srv/Getcurrentact "{id: 1, status: 'get_currentact'}"
+
+	(19)读取驱动器实际的位置值
+	ros2 service call /Getposact service_interfaces/srv/Getposact "{id: 1, status: 'get_posact'}"
+
+	(20)读取实际的的灵巧手角度值
+	ros2 service call /Getangleact service_interfaces/srv/Getangleact "{id: 1, status: 'get_angleact'}"
+
+	(21)读取实际的受力
+	ros2 service call /Getforceact service_interfaces/srv/Getforceact "{id: 1, status: 'get_forceact'}"
+
+	(22)读取温度信息
+	ros2 service call /Gettemp service_interfaces/srv/Gettemp "{id: 1, status: 'get_temp'}"
+
+	(23)读取故障信息
+	ros2 service call /Geterror rvice_interfaces/srv/Geterror "{id: 1, status: 'get_error'}"
+	
+	(24)读取设置的速度值
+	ros2 service call /Getspeedset service_interfaces/srv/Getspeedset "{id: 1, status: 'get_speedset'}"
+	(25)读取状态信息
+	ros2 service call /Getstatus service_interfaces/srv/Getstatus "{id: 1, status: 'get_status'}"
+	
+	(26)手势序列
+	 ros2 service call /Setgestureno service_interfaces/srv/Setgestureno "{gesture_no: 1,id: 1, status: 'setgesture'}"
+	
+    5)ros topic使用示例：实时读取灵巧手触觉传感器数据
+     需要重新打开一个新的终端，并执行终端指令：    source install/setup.bash
+1.ros2 run inspire_hand_modbus_ros2 handcontrol_topic_publisher_modbus.py
+2.ros2 run inspire_hand_modbus_ros2 handcontrol_topic_subscriber_modbus.py
+此示例将在终端打印发送频率以及实时打印当前整手触觉传感器数据。
+3. ros2 run inspire_hand_modbus_ros2 inspire_hand_modbus_topic.py
+此示例将发布设置角度、速度、力，读取角度、触觉、力、电缸温度的topic。
+topic调用示例：
+设置角度： ros2 topic pub -1 /set_angle_data service_interfaces/msg/SetAngle1 "{finger_ids: [1,2,3,4,5,6], angles: [1000,1000,1000,1000,1000,1000]}"
+读取角度： ros2 topic echo /angle_data 
+
+    6)ros service使用示例：脚本调用service_interfaces/srv中所包含的服务：Setpos
+     需要重新打开一个新的终端，并执行终端指令：    source install/setup.bash
+                                            ros2 run inspire_hand_modbus_ros2 hand_control_client_modbus_node 
+  

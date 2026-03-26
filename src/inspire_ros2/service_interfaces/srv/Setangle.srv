@@ -1,0 +1,12 @@
+# Request
+int16 id
+string status
+int16 angle0
+int16 angle1
+int16 angle2
+int16 angle3
+int16 angle4
+int16 angle5
+---
+# Response
+bool angle_accepted

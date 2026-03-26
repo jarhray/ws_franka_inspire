@@ -1,0 +1,16 @@
+# ROS2 / colcon
+build/
+install/
+log/
+
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Editor / system files
+.vscode/
+.idea/
+.DS_Store

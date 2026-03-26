@@ -1,0 +1,6 @@
+# Request
+int16 id
+string status
+---
+# Response
+bool setclear_error_accepted

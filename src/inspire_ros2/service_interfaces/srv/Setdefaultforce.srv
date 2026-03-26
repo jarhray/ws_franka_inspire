@@ -1,0 +1,12 @@
+# Request
+int16 id
+string status
+int16 force0
+int16 force1
+int16 force2
+int16 force3
+int16 force4
+int16 force5
+---
+# Response
+bool default_force_accepted

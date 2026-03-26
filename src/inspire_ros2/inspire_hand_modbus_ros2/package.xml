@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>inspire_hand_modbus_ros2</name>
+  <version>0.0.0</version>
+  <description>Gripper control package for ROS 2.</description>
+  
+  <!-- 维护者信息 -->
+  <maintainer email="inspire001@todo.todo">inspire001</maintainer>
+  
+  <!-- 版权信息 -->
+  <license>MIT</license>
+
+  <!-- 构建工具依赖 -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- 编译时依赖 -->
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>message_filters</build_depend>
+  <build_depend>service_interfaces</build_depend>
+  <build_depend>rosidl_default_generators</build_depend>
+  <build_depend>rclpy</build_depend> <!-- 添加对 rclpy 的编译依赖 -->
+  <build_depend>std_msgs</build_depend>
+
+  <!-- 运行时依赖 -->
+  <exec_depend>example_interfaces</exec_depend>
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>rclpy</exec_depend> <!-- 添加对 rclpy 的运行依赖 -->
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+
+  <!-- 测试时依赖 -->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <!-- 分组信息 -->
+  <member_of_group>rosidl_interface_packages</member_of_group>
+  
+  <!-- 导出信息 -->
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
+

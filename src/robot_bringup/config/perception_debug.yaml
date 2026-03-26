@@ -1,0 +1,25 @@
+observation_aggregator:
+  ros__parameters:
+    observation_topic: /robot/observation
+    publish_rate_hz: 30.0
+    rs_rgb_image_topic: /camera/color/image_raw
+    rs_depth_image_topic: /camera/depth/image_rect_raw
+    rs_camera_info_topic: /camera/color/camera_info
+    hand_angle_topic: /angle_data
+    hand_finger_id_order: [0, 1, 2, 3, 4, 5]
+    franka_namespace: ""
+    franka_state_controller_name: franka_robot_state_broadcaster
+    ros2_control_node_name: ros2_control_node
+    arm_joint_name_order: []
+
+experiment_logger:
+  ros__parameters:
+    enabled: true
+    log_dir: ~/.ros/experiment_logs
+    run_name: perception_debug
+    flush_every_n: 20
+    observation_topic: /robot/observation
+    arm_action_topic: /robot/arm_action
+    hand_action_topic: /robot/hand_action
+    arm_status_topic: /robot/arm_execution/status
+    arm_error_topic: /robot/arm_execution/error

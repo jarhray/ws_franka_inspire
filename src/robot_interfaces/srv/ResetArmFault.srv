@@ -1,0 +1,6 @@
+bool hard_reset
+float64 timeout_sec
+---
+bool success
+string message
+

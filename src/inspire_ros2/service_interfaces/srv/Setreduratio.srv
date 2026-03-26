@@ -1,0 +1,8 @@
+# Request
+int16 id
+string status
+int16 redu_ratio
+---
+# Response
+bool redu_ratiograb
+bool success

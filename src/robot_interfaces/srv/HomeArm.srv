@@ -1,0 +1,6 @@
+bool wait
+float64 timeout_sec
+---
+bool success
+string message
+
