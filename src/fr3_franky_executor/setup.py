@@ -10,7 +10,7 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'numpy'],
     zip_safe=True,
     maintainer='fr3_franky_executor',
     maintainer_email='todo@todo.todo',

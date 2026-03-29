@@ -11,6 +11,9 @@
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>franka_bringup</exec_depend>
+  <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>inspire_hand_modbus_ros2</exec_depend>
   <exec_depend>observation_aggregator</exec_depend>
   <exec_depend>policy_manager</exec_depend>
   <exec_depend>action_router</exec_depend>

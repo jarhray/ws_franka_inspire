@@ -1,21 +1,50 @@
 #!/usr/bin/env python3
 
 import math
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import SensorDataQoS
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
-
-from builtin_interfaces.msg import Time as BuiltinTime
 
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from robot_interfaces.msg import RobotObservation
 from sensor_msgs.msg import CameraInfo, Image, JointState
 
 from service_interfaces.msg import GetAngleAct1
+
+# ---------------------------------------------------------------------------
+# Inspire 手指标定：硬件寄存器 k∈[0,1000]（整数）→ 关节弧度 r = f(k)。
+# 必须与 inspire_executor/inspire_executor_node.py 中 radians_from_hardware_* 完全一致，
+# 以便策略层观测（弧度）与执行器（r→k 逆映射）同一套物理含义。
+# finger_id：0–3 四指弯曲，4 拇指弯曲，5 拇指侧摆。
+# ---------------------------------------------------------------------------
+
+
+def radians_from_hardware_four_fingers(k: float) -> float:
+    """Pinky / Ring / Middle / Index：r = f(k)。"""
+    return -5e-10 * k**3 + 9e-7 * k**2 - 0.0018 * k + 1.4191
+
+
+def radians_from_hardware_thumb_flexion(k: float) -> float:
+    """Thumb flexion (id=4)。"""
+    return 8e-11 * k**3 - 4e-8 * k**2 - 0.0006 * k + 0.5869
+
+
+def radians_from_hardware_thumb_abduction(k: float) -> float:
+    """Thumb abduction (id=5)，线性。"""
+    return -0.0012 * k + 1.1641
+
+
+def radians_from_hardware_for_finger_id(k: float, finger_id: int) -> float:
+    if finger_id in (0, 1, 2, 3):
+        return radians_from_hardware_four_fingers(k)
+    if finger_id == 4:
+        return radians_from_hardware_thumb_flexion(k)
+    if finger_id == 5:
+        return radians_from_hardware_thumb_abduction(k)
+    return radians_from_hardware_four_fingers(k)
 
 
 def _qualify(namespace: str, topic: str) -> str:
@@ -51,6 +80,20 @@ class ObservationAggregator(Node):
         self.rs_camera_info_topic = self.declare_parameter(
             "rs_camera_info_topic", "/camera/color/camera_info"
         ).value
+        # If your RealSense node is nested (e.g. /camera/camera/color/image_raw), either
+        # set the three rs_* params above, or add alternates here (all are subscribed).
+        self.rs_rgb_image_topic_alternates = self.declare_parameter(
+            "rs_rgb_image_topic_alternates",
+            ["/camera/camera/color/image_raw"],
+        ).value
+        self.rs_depth_image_topic_alternates = self.declare_parameter(
+            "rs_depth_image_topic_alternates",
+            ["/camera/camera/depth/image_rect_raw"],
+        ).value
+        self.rs_camera_info_topic_alternates = self.declare_parameter(
+            "rs_camera_info_topic_alternates",
+            ["/camera/camera/color/camera_info"],
+        ).value
 
         # ---- Parameters (Inspire) ----
         self.hand_angle_topic = self.declare_parameter(
@@ -85,6 +128,14 @@ class ObservationAggregator(Node):
             "ros2_control_node_name", "ros2_control_node"
         ).value
 
+        # When use_fake_hardware:=true, franka.launch.py does NOT spawn
+        # franka_robot_state_broadcaster; only joint_state_broadcaster feeds
+        # /franka/joint_states and /joint_states (see franka_bringup franka.launch.py).
+        self.arm_joint_state_extra_topics = self.declare_parameter(
+            "arm_joint_state_extra_topics",
+            ["/franka/joint_states", "/joint_states"],
+        ).value
+
         # Candidate topic bases (in priority order).
         self.arm_joint_state_topic_candidates = [
             _qualify(
@@ -97,6 +148,12 @@ class ObservationAggregator(Node):
             ),
             _qualify(self.franka_namespace, "/measured_joint_states"),
         ]
+        for t in self.arm_joint_state_extra_topics:
+            if not t:
+                continue
+            tt = t if str(t).startswith("/") else "/" + str(t)
+            if tt not in self.arm_joint_state_topic_candidates:
+                self.arm_joint_state_topic_candidates.append(tt)
         self.arm_pose_topic_candidates = [
             _qualify(self.franka_namespace, f"/{self.franka_state_controller_name}/current_pose"),
             _qualify(self.franka_namespace, f"/{self.ros2_control_node_name}/current_pose"),
@@ -114,7 +171,8 @@ class ObservationAggregator(Node):
             _qualify(self.franka_namespace, "/desired_end_effector_twist"),
         ]
 
-        qos = SensorDataQoS()
+        # ROS 2 Humble: use qos_profile_sensor_data (SensorDataQoS exists in newer APIs only).
+        qos = qos_profile_sensor_data
 
         # ---- Subscribers (FR3) ----
         self.last_arm_joint_state: Optional[JointState] = None
@@ -148,10 +206,10 @@ class ObservationAggregator(Node):
             )
 
         # ---- Subscribers (Hand) ----
-        self.last_hand_position: Optional[List[float]] = None
-        self.last_hand_velocity: Optional[List[float]] = None
+        # 回调里只缓存 angle_data 的原始硬件整数 k（与原先一致）；弧度仅在发布 RobotObservation 时换算。
+        self._hand_k_ordered: Optional[List[float]] = None
+        self._hand_vel_radians: List[float] = []
         self.last_hand_time: Optional[Time] = None
-
         self._last_hand_has_value = False
 
         self.create_subscription(GetAngleAct1, self.hand_angle_topic, self._on_hand_angle, qos)
@@ -167,14 +225,34 @@ class ObservationAggregator(Node):
         self.create_subscription(
             CameraInfo, self.rs_camera_info_topic, self._on_camera_info, qos
         )
+        for alt in self.rs_rgb_image_topic_alternates:
+            if alt and alt != self.rs_rgb_image_topic:
+                self.create_subscription(Image, alt, self._on_rgb_image, qos)
+        for alt in self.rs_depth_image_topic_alternates:
+            if alt and alt != self.rs_depth_image_topic:
+                self.create_subscription(Image, alt, self._on_depth_image, qos)
+        for alt in self.rs_camera_info_topic_alternates:
+            if alt and alt != self.rs_camera_info_topic:
+                self.create_subscription(CameraInfo, alt, self._on_camera_info, qos)
 
         # ---- Publisher ----
         self.observation_pub = self.create_publisher(RobotObservation, self.observation_topic, 10)
 
         self.timer = self.create_timer(1.0 / max(0.1, self.publish_rate_hz), self._on_timer)
 
+        self.get_logger().info("observation_aggregator (Python) started")
         self.get_logger().info(f"Publishing: {self.observation_topic}")
-        self.get_logger().info(f"FR3 JointState candidates: {self.arm_joint_state_topic_candidates}")
+        self.get_logger().info(
+            "FR3 JointState subscription candidates (first match wins per callback): "
+            f"{self.arm_joint_state_topic_candidates}"
+        )
+        self.get_logger().info(
+            "Note: with use_fake_hardware:=true, franka_robot_state_broadcaster is not loaded; "
+            "use /franka/joint_states or /joint_states (see arm_joint_state_extra_topics)."
+        )
+        self.get_logger().info(
+            f"RealSense RGB: {self.rs_rgb_image_topic} (+ alternates {self.rs_rgb_image_topic_alternates})"
+        )
 
     # ----------------- Callbacks -----------------
     def _on_arm_joint(self, msg: JointState) -> None:
@@ -194,29 +272,41 @@ class ObservationAggregator(Node):
     def _on_hand_angle(self, msg: GetAngleAct1) -> None:
         now = self.get_clock().now()
 
-        # finger_id -> angle
+        # finger_id -> hardware k（与原先一致：直接来自 GetAngleAct1.angles）
         angle_by_id: Dict[int, float] = {}
         n = min(len(msg.finger_ids), len(msg.angles))
         for i in range(n):
             angle_by_id[int(msg.finger_ids[i])] = float(msg.angles[i])
 
-        # Build ordered position array with NaN for missing.
-        pos: List[float] = [math.nan for _ in self.hand_finger_id_order]
+        k_ordered: List[float] = [math.nan for _ in self.hand_finger_id_order]
         for j, fid in enumerate(self.hand_finger_id_order):
-            if int(fid) in angle_by_id:
-                pos[j] = angle_by_id[int(fid)]
+            fid_i = int(fid)
+            if fid_i in angle_by_id:
+                k_ordered[j] = angle_by_id[fid_i]
 
-        # Velocity estimation by finite difference.
-        vel = [0.0 for _ in self.hand_finger_id_order]
-        if self._last_hand_has_value and self.last_hand_time is not None and len(pos) == len(self.last_hand_position or []):
+        # 角速度（rad/s）：对 r=f(k) 做差分，与发布侧同一套 f(k)
+        n_j = len(self.hand_finger_id_order)
+        vel_r = [0.0 for _ in range(n_j)]
+        if (
+            self._hand_k_ordered is not None
+            and self.last_hand_time is not None
+            and len(self._hand_k_ordered) == n_j
+        ):
             dt = (now - self.last_hand_time).nanoseconds / 1e9
             if dt > 1e-6:
-                for j in range(len(pos)):
-                    if math.isfinite(pos[j]) and math.isfinite(self.last_hand_position[j]):
-                        vel[j] = (pos[j] - self.last_hand_position[j]) / dt
+                for j in range(n_j):
+                    fid_i = int(self.hand_finger_id_order[j])
+                    k_new = k_ordered[j]
+                    k_old = self._hand_k_ordered[j]
+                    if math.isfinite(k_new) and math.isfinite(k_old):
+                        kn = max(0.0, min(1000.0, k_new))
+                        ko = max(0.0, min(1000.0, k_old))
+                        r_new = radians_from_hardware_for_finger_id(kn, fid_i)
+                        r_old = radians_from_hardware_for_finger_id(ko, fid_i)
+                        vel_r[j] = (r_new - r_old) / dt
 
-        self.last_hand_position = pos
-        self.last_hand_velocity = vel
+        self._hand_k_ordered = k_ordered
+        self._hand_vel_radians = vel_r
         self.last_hand_time = now
         self._last_hand_has_value = True
 
@@ -265,6 +355,20 @@ class ObservationAggregator(Node):
             return [0.0 for _ in self.arm_joint_name_order]
         return [vel_by_name.get(n, 0.0) for n in self.arm_joint_name_order]
 
+    def _hand_k_ordered_to_radians(self) -> Tuple[List[float], List[float]]:
+        """由缓存的硬件 k 得到 hand_joint_position（弧度）与 hand_joint_velocity（rad/s）。"""
+        if self._hand_k_ordered is None:
+            return [], []
+        pos: List[float] = []
+        for j, fid in enumerate(self.hand_finger_id_order):
+            k = self._hand_k_ordered[j] if j < len(self._hand_k_ordered) else math.nan
+            if not math.isfinite(k):
+                pos.append(math.nan)
+            else:
+                kc = max(0.0, min(1000.0, k))
+                pos.append(radians_from_hardware_for_finger_id(kc, int(fid)))
+        return pos, list(self._hand_vel_radians)
+
     @staticmethod
     def _max_time(times: List[Optional[Time]]) -> Optional[Time]:
         valid = [t for t in times if t is not None]
@@ -298,9 +402,10 @@ class ObservationAggregator(Node):
         if self.has_arm_twist and self.last_arm_twist is not None:
             obs.ee_twist = self.last_arm_twist.twist
 
-        if self._last_hand_has_value and self.last_hand_position is not None and self.last_hand_velocity is not None:
-            obs.hand_joint_position = list(self.last_hand_position)
-            obs.hand_joint_velocity = list(self.last_hand_velocity)
+        if self._last_hand_has_value and self._hand_k_ordered is not None:
+            hp, hv = self._hand_k_ordered_to_radians()
+            obs.hand_joint_position = hp
+            obs.hand_joint_velocity = hv
 
         if self.last_rgb_image is not None:
             obs.rgb_image = self.last_rgb_image

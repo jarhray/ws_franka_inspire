@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""FR3 executor framework with a mockable backend."""
+"""FR3 executor: mock backend or franky.Robot control with non-blocking motion execution."""
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+import queue
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Optional, Tuple, Union
 
 import rclpy
 from rclpy.node import Node
@@ -14,86 +15,18 @@ from robot_interfaces.msg import ArmAction
 from robot_interfaces.srv import HomeArm, ResetArmFault, StopArm
 from std_msgs.msg import String
 
-
-ARM_JOINT_POSITION = 0
-ARM_JOINT_VELOCITY = 1
-ARM_CARTESIAN_POSE = 2
-ARM_CARTESIAN_VELOCITY = 3
+from .franky_backend_impl import (
+    BackendResult,
+    MockFrankyBackend,
+    drain_event_queue,
+)
 
 
 def _finite(x: float) -> bool:
     return math.isfinite(x)
 
 
-def _fmt_vec(v: List[float], max_items: int = 3) -> str:
-    if not v:
-        return '[]'
-    clipped = v[:max_items]
-    suffix = '...' if len(v) > max_items else ''
-    return '[' + ', '.join(f'{x:.4f}' for x in clipped) + suffix + ']'
-
-
-@dataclass
-class BackendResult:
-    ok: bool
-    message: str
-
-
-class FrankyBackend:
-    """Mockable backend interface for FR3 motion execution."""
-
-    def __init__(self, mock_mode: bool) -> None:
-        self._mock_mode = mock_mode
-        self._connected = False
-        self._fault_active = False
-
-    def connect(self) -> BackendResult:
-        self._connected = True
-        mode = 'mock' if self._mock_mode else 'real-placeholder'
-        return BackendResult(True, f'backend connected ({mode})')
-
-    def execute_arm_action(self, msg: ArmAction) -> BackendResult:
-        if not self._connected:
-            return BackendResult(False, 'backend not connected')
-        if self._fault_active:
-            return BackendResult(False, 'backend fault active; call /reset_arm_fault')
-        if msg.control_mode == ARM_JOINT_POSITION:
-            return BackendResult(True, f'joint_position target={_fmt_vec(list(msg.joint_position))}')
-        if msg.control_mode == ARM_JOINT_VELOCITY:
-            return BackendResult(True, f'joint_velocity target={_fmt_vec(list(msg.joint_velocity))}')
-        if msg.control_mode == ARM_CARTESIAN_POSE:
-            p = msg.cartesian_pose.position
-            return BackendResult(True, f'cartesian_pose target=({p.x:.4f}, {p.y:.4f}, {p.z:.4f})')
-        if msg.control_mode == ARM_CARTESIAN_VELOCITY:
-            lv = msg.cartesian_velocity.linear
-            av = msg.cartesian_velocity.angular
-            return BackendResult(
-                True,
-                (
-                    'cartesian_velocity '
-                    f'lin=({lv.x:.4f}, {lv.y:.4f}, {lv.z:.4f}) '
-                    f'ang=({av.x:.4f}, {av.y:.4f}, {av.z:.4f})'
-                ),
-            )
-        return BackendResult(False, f'unsupported control_mode={msg.control_mode}')
-
-    def stop(self, immediate: bool) -> BackendResult:
-        if not self._connected:
-            return BackendResult(False, 'backend not connected')
-        return BackendResult(True, f'stop accepted (immediate={immediate})')
-
-    def home(self, wait: bool, timeout_sec: float) -> BackendResult:
-        if not self._connected:
-            return BackendResult(False, 'backend not connected')
-        return BackendResult(True, f'home accepted (wait={wait}, timeout={timeout_sec:.2f}s)')
-
-    def reset_fault(self, hard_reset: bool, timeout_sec: float) -> BackendResult:
-        if not self._connected:
-            return BackendResult(False, 'backend not connected')
-        self._fault_active = False
-        return BackendResult(
-            True, f'reset_fault accepted (hard_reset={hard_reset}, timeout={timeout_sec:.2f}s)'
-        )
+Backend = Union[MockFrankyBackend, Any]
 
 
 class Fr3FrankyExecutor(Node):
@@ -120,7 +53,47 @@ class Fr3FrankyExecutor(Node):
             'default_reference_frame', 'fr3_link0'
         ).get_parameter_value().string_value
 
-        self._backend = FrankyBackend(mock_mode=self._mock_mode)
+        # Franky / FCI (used when mock_mode=false)
+        self._fci_hostname = self.declare_parameter(
+            'fci_hostname', '172.16.0.2'
+        ).get_parameter_value().string_value
+        self._franky_controller_mode = self.declare_parameter(
+            'franky_controller_mode', 'joint_impedance'
+        ).get_parameter_value().string_value
+        self._franky_relative_dynamics_factor = self.declare_parameter(
+            'franky_relative_dynamics_factor', 1.0
+        ).get_parameter_value().double_value
+        self._default_velocity_duration_sec = self.declare_parameter(
+            'default_velocity_duration_sec', 0.1
+        ).get_parameter_value().double_value
+        self._velocity_async = self.declare_parameter(
+            'velocity_async', True
+        ).get_parameter_value().bool_value
+        self._home_joint_position = list(
+            self.declare_parameter(
+                'home_joint_position',
+                [0.0, -0.785398, 0.0, -2.35619, 0.0, 1.5708, 0.785398],
+            ).get_parameter_value().double_array_value
+        )
+
+        self._event_queue: queue.Queue[Tuple[str, str]] = queue.Queue()
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='franky_move')
+
+        self._backend: Backend
+        if self._mock_mode:
+            self._backend = MockFrankyBackend()
+        else:
+            from .real_franky_backend import RealFrankyBackend
+
+            self._backend = RealFrankyBackend(
+                fci_hostname=self._fci_hostname,
+                controller_mode=self._franky_controller_mode,
+                relative_dynamics_factor=self._franky_relative_dynamics_factor,
+                default_velocity_duration_sec=self._default_velocity_duration_sec,
+                home_joint_position=self._home_joint_position,
+                velocity_async=self._velocity_async,
+            )
+
         conn = self._backend.connect()
 
         self._status_pub = self.create_publisher(String, self._status_topic, 10)
@@ -139,10 +112,17 @@ class Fr3FrankyExecutor(Node):
         self.create_timer(period, self._on_status_timer)
 
         self._publish_status(conn.message)
+        if not conn.ok:
+            self._publish_error(conn.message)
+
         self.get_logger().info(
             f'fr3_franky_executor: sub={self._arm_action_topic} status={self._status_topic} '
-            f'error={self._error_topic} mock_mode={self._mock_mode}'
+            f'error={self._error_topic} mock_mode={self._mock_mode} fci_hostname={self._fci_hostname!r}'
         )
+
+    def destroy_node(self) -> bool:
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        return super().destroy_node()
 
     def _publish_status(self, text: str) -> None:
         out = String()
@@ -155,53 +135,123 @@ class Fr3FrankyExecutor(Node):
         self._error_pub.publish(out)
         self.get_logger().error(text)
 
+    def _drain_worker_events(self) -> None:
+        for kind, msg in drain_event_queue(self._event_queue):
+            if kind == 'status':
+                self._publish_status(msg)
+                self._last_result = msg
+            elif kind == 'error':
+                self._publish_error(msg)
+                self._last_result = msg
+
+    def _submit_backend(
+        self,
+        label: str,
+        fn,
+        *,
+        on_ok_status: Optional[str] = None,
+    ) -> None:
+        def run() -> None:
+            try:
+                result: BackendResult = fn()
+                if result.ok:
+                    self._event_queue.put(('status', f'{label}: {result.message}'))
+                else:
+                    self._event_queue.put(('error', f'{label} failed: {result.message}'))
+            except Exception as e:
+                self._event_queue.put(('error', f'{label} exception: {e!s}'))
+
+        self._executor.submit(run)
+        if on_ok_status:
+            self._publish_status(on_ok_status)
+
     def _on_arm_action(self, msg: ArmAction) -> None:
         if msg.reference_frame == '':
             msg.reference_frame = self._default_reference_frame
 
-        result = self._backend.execute_arm_action(msg)
         self._last_command_time = self.get_clock().now()
         self._last_mode = str(msg.control_mode)
-        self._last_result = result.message
 
-        if result.ok:
-            self._publish_status(f'execute mode={msg.control_mode}: {result.message}')
-        else:
-            self._publish_error(f'execute mode={msg.control_mode} failed: {result.message}')
+        if self._mock_mode:
+            result = self._backend.execute_arm_action(msg)
+            self._last_result = result.message
+            if result.ok:
+                self._publish_status(f'execute mode={msg.control_mode}: {result.message}')
+            else:
+                self._publish_error(f'execute mode={msg.control_mode} failed: {result.message}')
+            return
+
+        self._submit_backend(
+            f'execute mode={msg.control_mode}',
+            lambda: self._backend.execute_arm_action(msg),
+            on_ok_status=f'motion queued (mode={msg.control_mode})',
+        )
 
     def _on_stop(self, request: StopArm.Request, response: StopArm.Response) -> StopArm.Response:
-        result = self._backend.stop(bool(request.immediate))
-        response.success = bool(result.ok)
-        response.message = result.message
-        if result.ok:
-            self._publish_status(f'stop_arm: {result.message}')
-        else:
-            self._publish_error(f'stop_arm failed: {result.message}')
+        if self._mock_mode:
+            result = self._backend.stop(bool(request.immediate))
+            response.success = bool(result.ok)
+            response.message = result.message
+            if result.ok:
+                self._publish_status(f'stop_arm: {result.message}')
+            else:
+                self._publish_error(f'stop_arm failed: {result.message}')
+            return response
+
+        self._submit_backend(
+            'stop_arm',
+            lambda: self._backend.stop(bool(request.immediate)),
+            on_ok_status='stop_arm queued',
+        )
+        response.success = True
+        response.message = 'stop_arm submitted to worker'
         return response
 
     def _on_home(self, request: HomeArm.Request, response: HomeArm.Response) -> HomeArm.Response:
-        result = self._backend.home(bool(request.wait), float(request.timeout_sec))
-        response.success = bool(result.ok)
-        response.message = result.message
-        if result.ok:
-            self._publish_status(f'home_arm: {result.message}')
-        else:
-            self._publish_error(f'home_arm failed: {result.message}')
+        if self._mock_mode:
+            result = self._backend.home(bool(request.wait), float(request.timeout_sec))
+            response.success = bool(result.ok)
+            response.message = result.message
+            if result.ok:
+                self._publish_status(f'home_arm: {result.message}')
+            else:
+                self._publish_error(f'home_arm failed: {result.message}')
+            return response
+
+        self._submit_backend(
+            'home_arm',
+            lambda: self._backend.home(bool(request.wait), float(request.timeout_sec)),
+            on_ok_status='home_arm queued',
+        )
+        response.success = True
+        response.message = 'home_arm submitted to worker'
         return response
 
     def _on_reset_fault(
         self, request: ResetArmFault.Request, response: ResetArmFault.Response
     ) -> ResetArmFault.Response:
-        result = self._backend.reset_fault(bool(request.hard_reset), float(request.timeout_sec))
-        response.success = bool(result.ok)
-        response.message = result.message
-        if result.ok:
-            self._publish_status(f'reset_arm_fault: {result.message}')
-        else:
-            self._publish_error(f'reset_arm_fault failed: {result.message}')
+        if self._mock_mode:
+            result = self._backend.reset_fault(bool(request.hard_reset), float(request.timeout_sec))
+            response.success = bool(result.ok)
+            response.message = result.message
+            if result.ok:
+                self._publish_status(f'reset_arm_fault: {result.message}')
+            else:
+                self._publish_error(f'reset_arm_fault failed: {result.message}')
+            return response
+
+        self._submit_backend(
+            'reset_arm_fault',
+            lambda: self._backend.reset_fault(bool(request.hard_reset), float(request.timeout_sec)),
+            on_ok_status='reset_arm_fault queued',
+        )
+        response.success = True
+        response.message = 'reset_arm_fault submitted to worker'
         return response
 
     def _on_status_timer(self) -> None:
+        self._drain_worker_events()
+
         now = self.get_clock().now()
         age_sec = (now - self._last_command_time).nanoseconds / 1e9
         if _finite(age_sec) and age_sec > self._command_timeout_sec:
@@ -209,7 +259,6 @@ class Fr3FrankyExecutor(Node):
                 f'command timeout: no ArmAction received for {age_sec:.2f}s '
                 f'(limit={self._command_timeout_sec:.2f}s)'
             )
-            # Avoid flooding error topic every timer tick.
             self._last_command_time = now
             return
         self._publish_status(

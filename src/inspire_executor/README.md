@@ -1,41 +1,37 @@
 # inspire_executor
 
-`inspire_executor` 将标准化的 `robot_interfaces/HandAction` 转换为 `inspire_hand_modbus_ros2` 可直接消费的 `service_interfaces/SetAngle1` 指令，并支持参数化映射、关节裁剪与发送频率控制。
+将上游 `HandAction.joint_position` 中的关节弧度 **r** 转为 Inspire 硬件指令 **k∈[0,1000]**，并发布 `service_interfaces/SetAngle1`（供 `inspire_hand_modbus_ros2` 的 `set_angle_data` 使用）。
 
-## 功能描述
+本包**只做 r→k**，不在此做额外裁剪或多种输入模式，避免与其它节点参数约定冲突。
 
-- 接收标准手动作：`HandAction`
-- 关节映射：按 `hand_finger_id_order` 生成 `SetAngle1.finger_ids`
-- 上下限裁剪：按每个关节的 `joint_position_min/max` 裁剪目标值
-- 频率控制：按 `command_rate_hz` 定时发送（可保持最后一帧指令）
-- 可选输入缩放：支持将 `[0,1]` 归一化输入缩放到 `[0,1000]`
+## 标定（与 observation 成对）
+
+正向关系 **r = f(k)**（k 为硬件 0–1000）：
+
+| finger_id | 说明 | r = f(k) |
+|-----------|------|----------|
+| 0–3 | 四指弯曲 | \(r = -5\times10^{-10} k^3 + 9\times10^{-7} k^2 - 0.0018\,k + 1.4191\) |
+| 4 | 拇指弯曲 | \(r = 8\times10^{-11} k^3 - 4\times10^{-8} k^2 - 0.0006\,k + 0.5869\) |
+| 5 | 拇指侧摆 | \(r = -0.0012\,k + 1.1641\) |
+
+- **finger_id 0–4**：模块导入时预计算 `f(0)…f(1000)`，对目标 r 在表上做二分，取最近整数 k（约 **log₂(1001)≈10** 次浮点比较/关节，**热路径不计算三次幂**）。
+- **finger_id 5**：线性闭式 **k = round((1.1641 − r) / 0.0012)**，再限制到 [0,1000]，**O(1)**。
+
+单条 `HandAction` 约 **6×10** 量级简单运算，远低于典型控制周期预算；若仍要极限优化，可将二分改为从上一帧 k 出发的局部搜索（需状态，当前未实现）。
 
 ## 订阅与发布
 
-- 订阅
-  - `hand_action_topic`（默认 `/robot/hand_action`），类型：`robot_interfaces/msg/HandAction`
-- 发布
-  - `set_angle_topic`（默认 `set_angle_data`），类型：`service_interfaces/msg/SetAngle1`
+- 订阅：`hand_action_topic`（默认 `/robot/hand_action`），`robot_interfaces/msg/HandAction`
+- 发布：`set_angle_topic`（默认 `set_angle_data`），`service_interfaces/msg/SetAngle1`
 
-> 说明：`inspire_hand_modbus_ros2` 中 `inspire_hand_modbus_topic.py` 默认订阅 `set_angle_data`。
+## 参数（仅保留与其它包配合所需）
 
-## 主要参数
+- `hand_action_topic`
+- `set_angle_topic`
+- `command_rate_hz` + `hold_last_command`（定时重发上一帧，行为与先前一致）
+- `hand_finger_id_order`：`joint_position[i]` 对应的手指 ID 顺序（默认 `[0,1,2,3,4,5]`）
 
-- `hand_action_topic`：输入手动作 topic
-- `set_angle_topic`：输出角度控制 topic（通常保持 `set_angle_data`）
-- `hand_finger_id_order`：关节到手指 ID 的映射顺序（默认 `[0,1,2,3,4,5]`）
-- `joint_position_min / joint_position_max`：每个关节的上下限
-- `command_rate_hz`：发布频率（Hz）
-- `hold_last_command`：
-  - `true`：收到一次动作后持续按频率重发最后一帧
-  - `false`：仅在收到新动作时发布一次
-- `input_normalized_0_1`：
-  - `true`：输入范围按 `[0,1]` 解释并乘以 1000
-  - `false`：输入按原值（通常 0~1000）使用
-
-## 使用方法
-
-### 1) 编译
+## 编译与运行
 
 ```bash
 cd ~/ws_franka_inspire
@@ -43,35 +39,10 @@ source .venv/bin/activate
 source /opt/ros/humble/setup.bash
 colcon build --packages-select inspire_executor
 source install/setup.bash
-```
-
-### 2) 启动依赖节点（Inspire 驱动）
-
-确保 `inspire_hand_modbus_ros2` 已启动且在运行 `inspire_hand_modbus_topic.py`（订阅 `set_angle_data`）。
-
-### 3) 启动执行器
-
-```bash
 ros2 run inspire_executor inspire_executor_node
 ```
 
-### 4) 参数化启动示例
+## 联调
 
-```bash
-ros2 run inspire_executor inspire_executor_node --ros-args \
-  -p hand_action_topic:=/robot/hand_action \
-  -p set_angle_topic:=set_angle_data \
-  -p command_rate_hz:=20.0 \
-  -p hold_last_command:=true \
-  -p hand_finger_id_order:="[0,1,2,3,4,5]" \
-  -p joint_position_min:="[0.0,0.0,0.0,0.0,0.0,0.0]" \
-  -p joint_position_max:="[1000.0,1000.0,1000.0,1000.0,1000.0,1000.0]"
-```
-
-## 联调建议
-
-- 先确认 `set_angle_data` 上有消息：
-  - `ros2 topic echo /set_angle_data`
-- 再确认手部反馈（如 `/angle_data`）是否按预期变化
-- 初次联调建议低频、低幅度动作，逐步放开参数
-
+- `ros2 topic echo /set_angle_data`
+- 与 `observation_aggregator` 中实现的 **k→r** 使用同一组 **f(k)**，便于闭环核对

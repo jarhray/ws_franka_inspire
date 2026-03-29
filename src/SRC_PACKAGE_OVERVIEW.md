@@ -143,7 +143,7 @@
 
 - 订阅 `/robot/hand_action`
 - 发布 `set_angle_data`（`service_interfaces/msg/SetAngle1`）
-- 支持 finger 顺序映射、上下限裁剪、保持最后命令重发
+- 将 `HandAction` 中的关节弧度 **r** 转为硬件整数 **k**（与 observation 侧 **k→r** 成对），支持 finger 顺序映射与保持最后命令重发
 
 ---
 

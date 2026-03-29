@@ -108,7 +108,6 @@
   - `command_rate_hz`
   - `hold_last_command`
   - `hand_finger_id_order`
-  - `joint_position_min/max`
 - 常用命令：
   - `ros2 run inspire_executor inspire_executor_node`
 

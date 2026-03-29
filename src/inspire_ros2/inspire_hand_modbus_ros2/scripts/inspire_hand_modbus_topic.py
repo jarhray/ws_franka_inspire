@@ -251,7 +251,7 @@ class ModbusNode(Node):
                 force_data_msg.finger_names.append(FINGER_NAMES.get(finger_id, "Unknown Finger"))
 
             self.force_publisher.publish(force_data_msg)
-            self.get_logger().info(f"已发布力数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
+            # self.get_logger().info(f"已发布力数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
 
         if self.angle_publisher.get_subscription_count() > 0:
             angle_data_msg = GetAngleAct1()
@@ -266,7 +266,7 @@ class ModbusNode(Node):
                 angle_data_msg.finger_names.append(FINGER_NAMES.get(finger_id, "Unknown Finger"))
 
             self.angle_publisher.publish(angle_data_msg)
-            self.get_logger().info(f"已发布角度数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
+            # self.get_logger().info(f"已发布角度数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
 
         if self.touch_publisher.get_subscription_count() > 0:
             touch_data = self.read_touch_data()
@@ -277,7 +277,7 @@ class ModbusNode(Node):
             touch_data_msg.tangential_forces = touch_data['tangential_forces']
 
             self.touch_publisher.publish(touch_data_msg)
-            self.get_logger().info(f"已发布触觉数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
+            # self.get_logger().info(f"已发布触觉数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
 
         if self.temp_publisher.get_subscription_count() > 0:
             temp_data_msg = GetTemp1()
@@ -292,7 +292,7 @@ class ModbusNode(Node):
                 temp_data_msg.finger_names.append(FINGER_NAMES.get(finger_id, "Unknown Finger"))
 
             self.temp_publisher.publish(temp_data_msg)
-            self.get_logger().info(f"已发布温度数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
+            # self.get_logger().info(f"已发布温度数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
 
     def angle_callback(self, msg):
         for finger_id, angle in zip(msg.finger_ids, msg.angles):

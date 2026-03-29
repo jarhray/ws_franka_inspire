@@ -54,6 +54,13 @@ fr3_franky_executor:
     status_rate_hz: 5.0
     mock_mode: true
     default_reference_frame: fr3_link0
+    # Real robot (mock_mode:=false): set fci_hostname to the robot FCI IP / hostname
+    fci_hostname: "172.16.0.2"
+    franky_controller_mode: joint_impedance
+    franky_relative_dynamics_factor: 1.0
+    default_velocity_duration_sec: 0.1
+    velocity_async: true
+    home_joint_position: [0.0, -0.785398, 0.0, -2.35619, 0.0, 1.5708, 0.785398]
 
 inspire_executor:
   ros__parameters:
@@ -62,8 +69,6 @@ inspire_executor:
     command_rate_hz: 30.0
     hold_last_command: true
     hand_finger_id_order: [0, 1, 2, 3, 4, 5]
-    joint_position_min: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    joint_position_max: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
 
 experiment_logger:
   ros__parameters:
