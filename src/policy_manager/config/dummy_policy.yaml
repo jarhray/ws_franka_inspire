@@ -1,0 +1,17 @@
+policy_manager:
+  ros__parameters:
+    policy_type: dummy
+    publish_rate_hz: 15.0
+
+    arm_control_mode: 0
+    hand_control_mode: 0
+    is_relative: false
+    arm_reference_frame: fr3_link0
+
+    arm_joint_position: [0.0, -0.6, 0.0, -2.0, 0.0, 1.5, 0.7]
+    arm_joint_velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    hand_joint_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    hand_joint_velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    arm_duration_sec: 0.1
+    hand_duration_sec: 0.1

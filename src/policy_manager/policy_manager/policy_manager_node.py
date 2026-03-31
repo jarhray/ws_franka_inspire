@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Policy manager with policy_type switch and dummy fallback output."""
+"""Policy manager with policy_type switch and ACT integration."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ import rclpy
 from rclpy.node import Node
 
 from robot_interfaces.msg import RobotObservation, WholeBodyAction
+from policy_manager.base_policy import BasePolicy
+from policy_manager.act_policy_adapter import ACTPolicyAdapter
+from policy_manager.dummy_policy import DummyPolicy
 
 
 class PolicyManager(Node):
@@ -16,9 +19,6 @@ class PolicyManager(Node):
         super().__init__('policy_manager')
 
         self._policy_type = self.declare_parameter('policy_type', 'dummy').get_parameter_value().string_value
-        self._publish_rate_hz = self.declare_parameter(
-            'publish_rate_hz', 15.0
-        ).get_parameter_value().double_value
         self._observation_topic = self.declare_parameter(
             'observation_topic', '/robot/observation'
         ).get_parameter_value().string_value
@@ -29,76 +29,52 @@ class PolicyManager(Node):
             'require_observation_before_publish', True
         ).get_parameter_value().bool_value
 
-        self._arm_control_mode = self.declare_parameter('arm_control_mode', 0).get_parameter_value().integer_value
-        self._hand_control_mode = self.declare_parameter(
-            'hand_control_mode', 0
-        ).get_parameter_value().integer_value
-        self._is_relative = self.declare_parameter('is_relative', False).get_parameter_value().bool_value
-        self._arm_reference_frame = self.declare_parameter(
-            'arm_reference_frame', 'fr3_link0'
-        ).get_parameter_value().string_value
-
-        self._arm_joint_position = list(
-            self.declare_parameter('arm_joint_position', [0.0] * 7).get_parameter_value().double_array_value
-        )
-        self._arm_joint_velocity = list(
-            self.declare_parameter('arm_joint_velocity', [0.0] * 7).get_parameter_value().double_array_value
-        )
-        self._hand_joint_position = list(
-            self.declare_parameter('hand_joint_position', [0.0] * 6).get_parameter_value().double_array_value
-        )
-        self._hand_joint_velocity = list(
-            self.declare_parameter('hand_joint_velocity', [0.0] * 6).get_parameter_value().double_array_value
-        )
-        self._arm_duration_sec = self.declare_parameter(
-            'arm_duration_sec', 0.1
-        ).get_parameter_value().double_value
-        self._hand_duration_sec = self.declare_parameter(
-            'hand_duration_sec', 0.1
-        ).get_parameter_value().double_value
-
         self._last_observation: Optional[RobotObservation] = None
         self._warned_no_observation = False
+        self._policy: Optional[BasePolicy] = None
+        self._warned_bad_observation = False
 
         self.create_subscription(RobotObservation, self._observation_topic, self._on_observation, 10)
         self._pub = self.create_publisher(WholeBodyAction, self._whole_body_action_topic, 10)
-        self.create_timer(1.0 / max(self._publish_rate_hz, 0.1), self._on_timer)
+        if self._policy_type not in ('dummy', 'bc', 'vla', 'act'):
+            raise RuntimeError(f'Unknown policy_type={self._policy_type}.')
 
-        if self._policy_type not in ('dummy', 'bc', 'vla'):
+        # 根据 policy_type 选择具体模型，并让模型自己声明/读取所需参数。
+        if self._policy_type == 'act':
+            self._policy = ACTPolicyAdapter.from_node(self)
+        elif self._policy_type == 'dummy':
+            self._policy = DummyPolicy.from_node(self)
+        else:
             self.get_logger().warn(
-                f'Unknown policy_type={self._policy_type}, fallback to dummy.'
+                f'policy_type={self._policy_type} not integrated yet; using no-op policy.'
             )
-            self._policy_type = 'dummy'
+            self._policy = None
+
+        timer_hz = self._policy.control_hz if self._policy is not None else 1.0
+        self.create_timer(1.0 / max(timer_hz, 0.1), self._on_timer)
 
         self.get_logger().info(
             f'policy_manager: type={self._policy_type} obs={self._observation_topic} '
-            f'out={self._whole_body_action_topic} rate={self._publish_rate_hz}Hz'
+            f'out={self._whole_body_action_topic} rate={timer_hz}Hz'
         )
-        if self._policy_type in ('bc', 'vla'):
-            self.get_logger().warn(
-                f'policy_type={self._policy_type} not integrated yet; using dummy outputs.'
-            )
+        if self._policy is None:
+            self.get_logger().warn('No concrete policy initialized; node will not publish actions.')
 
     def _on_observation(self, msg: RobotObservation) -> None:
         self._last_observation = msg
         self._warned_no_observation = False
 
-    def _build_dummy_action(self) -> WholeBodyAction:
-        msg = WholeBodyAction()
-        msg.header.stamp = self.get_clock().now().to_msg()
-
-        msg.arm.control_mode = int(self._arm_control_mode)
-        msg.arm.is_relative = bool(self._is_relative)
-        msg.arm.reference_frame = self._arm_reference_frame
-        msg.arm.joint_position = [float(x) for x in self._arm_joint_position]
-        msg.arm.joint_velocity = [float(x) for x in self._arm_joint_velocity]
-        msg.arm.duration_sec = float(self._arm_duration_sec)
-
-        msg.hand.control_mode = int(self._hand_control_mode)
-        msg.hand.is_relative = bool(self._is_relative)
-        msg.hand.joint_position = [float(x) for x in self._hand_joint_position]
-        msg.hand.joint_velocity = [float(x) for x in self._hand_joint_velocity]
-        msg.hand.duration_sec = float(self._hand_duration_sec)
+    def _infer_policy_action(self, obs: RobotObservation) -> Optional[WholeBodyAction]:
+        try:
+            if self._policy is None:
+                return None
+            msg = self._policy.infer(obs)
+        except Exception as exc:
+            if not self._warned_bad_observation:
+                self.get_logger().warn(f'Skip policy inference due to error: {exc}')
+                self._warned_bad_observation = True
+            return None
+        self._warned_bad_observation = False
         return msg
 
     def _on_timer(self) -> None:
@@ -110,13 +86,9 @@ class PolicyManager(Node):
                 self._warned_no_observation = True
             return
 
-        if self._policy_type == 'dummy':
-            out = self._build_dummy_action()
-        elif self._policy_type in ('bc', 'vla'):
-            # Placeholder: keep interface stable while model integration is pending.
-            out = self._build_dummy_action()
-        else:
-            out = self._build_dummy_action()
+        out = self._infer_policy_action(self._last_observation)
+        if out is None:
+            return
 
         self._pub.publish(out)
 

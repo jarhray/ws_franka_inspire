@@ -2,6 +2,8 @@
 
 `fr3_franky_executor` 是机械臂执行层节点：接收标准化 `ArmAction`，按控制模式通过 **franky**（`franky.Robot`）执行运动，并提供 stop/home/reset fault 服务与状态/错误发布。
 
+> 单持有者约束：在 `mock_mode=false` 时，本节点应是**唯一** `franky.Robot`/FCI 持有者。其他模块（测试脚本、状态消费方）必须只通过 ROS topic/service 与本节点交互，不能再直接 `Robot(...)` 连接 FR3。
+
 - `mock_mode=true`（默认）：不连接机器人，仅打印/回显意图，便于无硬件联调。
 - `mock_mode=false`：连接 Franka FCI，使用 `franky` 的 `JointMotion` / `JointVelocityMotion` / `CartesianMotion` / `CartesianVelocityMotion` 调用 `Robot.move()`。
 
@@ -100,9 +102,34 @@ ros2 service call /home_arm robot_interfaces/srv/HomeArm "{wait: false, timeout_
 ros2 service call /reset_arm_fault robot_interfaces/srv/ResetArmFault "{hard_reset: false, timeout_sec: 3.0}"
 ```
 
+### 4) quick test（推荐：ROS 发布 ArmAction）
+
+以下脚本不会直接连接 FCI，而是向 `fr3_franky_executor` 发布动作：
+
+```bash
+cd ~
+python3 franky_quick_test.py --topic /robot/arm_action --run-joint
+python3 franky_quick_test.py --topic /robot/arm_action --run-cartesian
+```
+
+若不传 `--run-joint/--run-cartesian`，默认会依次发送 joint + cartesian 两条动作。
+
+### 5) 一键硬件启动（RealSense + FR3 executor + Inspire）
+
+```bash
+ros2 launch robot_bringup hardware_bringup.launch.py \
+  robot_ip:=192.168.1.2 inspire_mode:=2
+```
+
+该 launch 已内置 `fr3_franky_executor(mock_mode:=false)`，并发布：
+- `/franka_robot_state_broadcaster/measured_joint_states`
+- `/franka_robot_state_broadcaster/current_pose`
+- `/franka_robot_state_broadcaster/desired_end_effector_twist`
+
 ## 安全提示
 
 - 真实模式会直接运动机器人；请先在低速、小范围验证 `ArmAction` 与 `franky_controller_mode` 是否匹配你的任务。
+- 严禁并行运行两个 `franky.Robot` 持有进程（例如 executor + 直连测试脚本）；否则极易出现 UDP timeout / Net Exception。
 - 若与 `franka_ros2` / 其他控制器同时争用 FCI，需自行避免多主控冲突。
 
 ## 许可证

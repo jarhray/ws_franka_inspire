@@ -1,41 +1,50 @@
 #!/usr/bin/env python3
 # Copyright 2026
 # SPDX-License-Identifier: MIT
-"""一键启动 RealSense + FR3(ros2_control) + Inspire(Modbus) 三条硬件链路。
+"""一键启动 RealSense + FR3(executor + state publish) + Inspire(Modbus) 三条硬件链路。
 
-分别 include 上游包内已有 launch（不修改 franka / realsense / inspire 源码）：
+分别 include 上游包内已有 launch（不修改 realsense / inspire 源码）：
   - realsense2_camera/launch/rs_launch.py
-  - franka_bringup/launch/franka.launch.py
+  - fr3_franky_executor/fr3_franky_executor_node.py
   - inspire_hand_modbus_ros2/launch/control.launch.py
 
 用法示例：
   ros2 launch robot_bringup hardware_bringup.launch.py \\
-    robot_type:=fr3 use_fake_hardware:=true inspire_mode:=2
+    robot_ip:=192.168.1.2 inspire_mode:=2
 """
 
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description() -> LaunchDescription:
+    bringup_share = get_package_share_directory('robot_bringup')
+
+    default_executor_params = os.path.join(
+        bringup_share, 'config', 'fr3_franky_executor_bringup.yaml'
+    )
+    executor_params_file = LaunchConfiguration('executor_params_file')
+
     # ----- RealSense (rs_launch.py) -----
     camera_name = LaunchConfiguration('camera_name')
     camera_namespace = LaunchConfiguration('camera_namespace')
     serial_no = LaunchConfiguration('serial_no')
 
-    # ----- Franka (franka.launch.py) -----
-    robot_type = LaunchConfiguration('robot_type')
-    arm_prefix = LaunchConfiguration('arm_prefix')
-    franka_namespace = LaunchConfiguration('franka_namespace')
+    # ----- FR3 executor (franky) -----
     robot_ip = LaunchConfiguration('robot_ip')
-    load_gripper = LaunchConfiguration('load_gripper')
-    use_fake_hardware = LaunchConfiguration('use_fake_hardware')
-    fake_sensor_commands = LaunchConfiguration('fake_sensor_commands')
     joint_state_rate = LaunchConfiguration('joint_state_rate')
-    controllers_yaml = LaunchConfiguration('controllers_yaml')
+    fr3_franky_relative_dynamics_factor = LaunchConfiguration('fr3_franky_relative_dynamics_factor')
+    fr3_state_bridge_controller_mode = LaunchConfiguration('fr3_state_bridge_controller_mode')
+    fr3_state_bridge_joint_topic = LaunchConfiguration('fr3_state_bridge_joint_topic')
+    fr3_state_bridge_pose_topic = LaunchConfiguration('fr3_state_bridge_pose_topic')
+    fr3_state_bridge_twist_topic = LaunchConfiguration('fr3_state_bridge_twist_topic')
 
     # ----- Inspire (control.launch.py) -----
     inspire_mode = LaunchConfiguration('inspire_mode')
@@ -43,17 +52,19 @@ def generate_launch_description() -> LaunchDescription:
     realsense_launch = PathJoinSubstitution(
         [FindPackageShare('realsense2_camera'), 'launch', 'rs_launch.py']
     )
-    franka_launch = PathJoinSubstitution(
-        [FindPackageShare('franka_bringup'), 'launch', 'franka.launch.py']
-    )
     inspire_launch = PathJoinSubstitution(
         [FindPackageShare('inspire_hand_modbus_ros2'), 'launch', 'control.launch.py']
     )
 
     return LaunchDescription(
         [
-            LogInfo(msg=['[hardware_bringup] Including realsense2_camera, franka_bringup, inspire_hand_modbus_ros2']),
-            # --- Declare arguments (forwarded to child launches) ---
+            LogInfo(msg=['[hardware_bringup] Including realsense2_camera, fr3_franky_executor, inspire_hand_modbus_ros2']),
+            # --- Declare arguments ---
+            DeclareLaunchArgument(
+                'executor_params_file',
+                default_value=default_executor_params,
+                description='YAML file for fr3_franky_executor parameters.',
+            ),
             DeclareLaunchArgument(
                 'camera_name',
                 default_value='camera',
@@ -71,51 +82,39 @@ def generate_launch_description() -> LaunchDescription:
                 description="RealSense serial_no filter; default empty ''",
             ),
             DeclareLaunchArgument(
-                'robot_type',
-                default_value='fr3',
-                description='Franka robot_type xacro id (e.g. fr3).',
-            ),
-            DeclareLaunchArgument(
-                'arm_prefix',
-                default_value='',
-                description='Franka arm_prefix.',
-            ),
-            DeclareLaunchArgument(
-                'franka_namespace',
-                default_value='',
-                description='Franka ros2_control / joint_state namespace (franka.launch namespace).',
-            ),
-            DeclareLaunchArgument(
                 'robot_ip',
-                default_value='172.16.0.3',
-                description='Franka robot IP.',
-            ),
-            DeclareLaunchArgument(
-                'load_gripper',
-                default_value='false',
-                description='Franka load_gripper.',
-            ),
-            DeclareLaunchArgument(
-                'use_fake_hardware',
-                default_value='false',
-                description='Franka use_fake_hardware.',
-            ),
-            DeclareLaunchArgument(
-                'fake_sensor_commands',
-                default_value='false',
-                description='Franka fake_sensor_commands.',
+                default_value='192.168.1.2',
+                description='FR3 FCI robot IP (used by fr3_franky_executor).',
             ),
             DeclareLaunchArgument(
                 'joint_state_rate',
                 default_value='30',
-                description='Franka joint_state_publisher rate (Hz).',
+                description='FR3 state publish rate (Hz).',
             ),
             DeclareLaunchArgument(
-                'controllers_yaml',
-                default_value=PathJoinSubstitution(
-                    [FindPackageShare('franka_bringup'), 'config', 'controllers.yaml']
-                ),
-                description='Franka controllers yaml path.',
+                'fr3_franky_relative_dynamics_factor',
+                default_value='0.1',
+                description='fr3_franky_executor relative_dynamics_factor (0~1, smaller is safer).',
+            ),
+            DeclareLaunchArgument(
+                'fr3_state_bridge_controller_mode',
+                default_value='joint_impedance',
+                description='fr3_franky_executor controller_mode: joint_impedance or cartesian_impedance.',
+            ),
+            DeclareLaunchArgument(
+                'fr3_state_bridge_joint_topic',
+                default_value='/franka_robot_state_broadcaster/measured_joint_states',
+                description='JointState topic published by fr3_franky_executor.',
+            ),
+            DeclareLaunchArgument(
+                'fr3_state_bridge_pose_topic',
+                default_value='/franka_robot_state_broadcaster/current_pose',
+                description='PoseStamped topic published by fr3_franky_executor.',
+            ),
+            DeclareLaunchArgument(
+                'fr3_state_bridge_twist_topic',
+                default_value='/franka_robot_state_broadcaster/desired_end_effector_twist',
+                description='TwistStamped topic published by fr3_franky_executor.',
             ),
             DeclareLaunchArgument(
                 'inspire_mode',
@@ -130,19 +129,12 @@ def generate_launch_description() -> LaunchDescription:
                     'serial_no': serial_no,
                 }.items(),
             ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource([franka_launch]),
-                launch_arguments={
-                    'robot_type': robot_type,
-                    'arm_prefix': arm_prefix,
-                    'namespace': franka_namespace,
-                    'robot_ip': robot_ip,
-                    'load_gripper': load_gripper,
-                    'use_fake_hardware': use_fake_hardware,
-                    'fake_sensor_commands': fake_sensor_commands,
-                    'joint_state_rate': joint_state_rate,
-                    'controllers_yaml': controllers_yaml,
-                }.items(),
+            Node(
+                package='fr3_franky_executor',
+                executable='fr3_franky_executor_node',
+                name='fr3_franky_executor',
+                output='screen',
+                parameters=[executor_params_file, {'mock_mode': False, 'fci_hostname': robot_ip}],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([inspire_launch]),

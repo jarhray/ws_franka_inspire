@@ -7,13 +7,18 @@
 - `launch/perception_debug.launch.py`
   - 仅启动 `observation_aggregator`
   - 用于观测链路联调（不下发控制动作）
+- `launch/hardware_bringup.launch.py`
+  - 启动硬件底座链路：
+    - `realsense2_camera/rs_launch.py`
+    - `fr3_franky_executor`（`mock_mode=false`，并发布 FR3 三路状态）
+    - `inspire_hand_modbus_ros2/control.launch.py`
 - `launch/real_policy_execute.launch.py`
   - 启动完整链路：
     - `observation_aggregator`
     - `policy_manager`
     - `action_router`
-    - `fr3_franky_executor`
     - `inspire_executor`
+  - 机械臂执行依赖已启动的 `hardware_bringup.launch.py`（其中包含 `fr3_franky_executor`）
 
 ## 参数文件
 
@@ -43,10 +48,18 @@ ros2 launch robot_bringup perception_debug.launch.py
 ### 2) 完整策略执行链路
 
 ```bash
+# 需先启动 hardware_bringup.launch.py
 ros2 launch robot_bringup real_policy_execute.launch.py
 ```
 
-### 3) 指定自定义参数文件
+### 3) 硬件底座一键启动（推荐）
+
+```bash
+ros2 launch robot_bringup hardware_bringup.launch.py \
+  robot_ip:=192.168.1.2 inspire_mode:=2
+```
+
+### 4) 指定自定义参数文件
 
 ```bash
 ros2 launch robot_bringup real_policy_execute.launch.py \
@@ -59,6 +72,7 @@ ros2 launch robot_bringup real_policy_execute.launch.py \
   - FR3 状态话题可用
   - RealSense 图像话题可用
   - Inspire 驱动节点可用
+- FR3 采用单持有者模式：仅 `fr3_franky_executor(mock_mode=false)` 持有 FCI；禁止并行运行其他直连 `franky.Robot` 脚本
 - 再启动 `robot_bringup` 的 launch，检查：
   - `/robot/observation`
   - `/robot/whole_body_action`

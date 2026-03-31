@@ -14,19 +14,9 @@ observation_aggregator:
 
 policy_manager:
   ros__parameters:
-    policy_type: dummy
-    publish_rate_hz: 15.0
+    policy_type: act
     observation_topic: /robot/observation
     whole_body_action_topic: /robot/whole_body_action
-    arm_control_mode: 0
-    hand_control_mode: 0
-    is_relative: false
-    arm_joint_position: [0.0, -0.6, 0.0, -2.0, 0.0, 1.5, 0.7]
-    arm_joint_velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    hand_joint_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    hand_joint_velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    arm_duration_sec: 0.1
-    hand_duration_sec: 0.1
     require_observation_before_publish: true
 
 action_router:
@@ -51,16 +41,30 @@ fr3_franky_executor:
     status_topic: /robot/arm_execution/status
     error_topic: /robot/arm_execution/error
     command_timeout_sec: 2.0
+    command_timeout_warn_interval_sec: 15.0
     status_rate_hz: 5.0
-    mock_mode: true
+    # real_policy_execute 通常跑真实机器人，如需离线测试可改为 true
+    mock_mode: false
     default_reference_frame: fr3_link0
     # Real robot (mock_mode:=false): set fci_hostname to the robot FCI IP / hostname
-    fci_hostname: "172.16.0.2"
+    fci_hostname: "192.168.1.2"
     franky_controller_mode: joint_impedance
-    franky_relative_dynamics_factor: 1.0
+
+    # 0~1: 越大通常越激进/越快，但更容易触发保护（reflex）
+    franky_relative_dynamics_factor: 0.3
+
     default_velocity_duration_sec: 0.1
     velocity_async: true
+    position_async: true
     home_joint_position: [0.0, -0.785398, 0.0, -2.35619, 0.0, 1.5708, 0.785398]
+
+    # ---- state publish to keep observation_aggregator compatible ----
+    state_joint_topic: /franka_robot_state_broadcaster/measured_joint_states
+    state_pose_topic: /franka_robot_state_broadcaster/current_pose
+    state_twist_topic: /franka_robot_state_broadcaster/desired_end_effector_twist
+    state_publish_rate_hz: 30.0
+
+    joint_names: [fr3_joint1, fr3_joint2, fr3_joint3, fr3_joint4, fr3_joint5, fr3_joint6, fr3_joint7]
 
 inspire_executor:
   ros__parameters:

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""HandAction.joint_position（弧度 r）→ SetAngle1（硬件整数 k∈[0,1000]）。"""
+"""HandAction.joint_position（[-1,1]）→ SetAngle1（硬件整数 k∈[0,1000]）。"""
 
 from __future__ import annotations
 
 import math
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
@@ -14,70 +14,13 @@ from service_interfaces.msg import SetAngle1
 
 HAND_JOINT_POSITION = 0
 
-# ---------------------------------------------------------------------------
-# 标定：r = f(k)，k 为硬件 0–1000。与 observation_aggregator 侧「k→r」一致。
-# 逆映射：预计算 f(0)..f(1000)，对 r 在表上做二分（每关节 O(log N)，N=1001，无热路径三次幂）。
-# finger_id：0–3 四指弯曲，4 拇指弯曲，5 拇指侧摆（闭式逆，O(1)）。
-# ---------------------------------------------------------------------------
-
-
-def radians_from_hardware_four_fingers(k: float) -> float:
-    return -5e-10 * k**3 + 9e-7 * k**2 - 0.0018 * k + 1.4191
-
-
-def radians_from_hardware_thumb_flexion(k: float) -> float:
-    return 8e-11 * k**3 - 4e-8 * k**2 - 0.0006 * k + 0.5869
-
-
-def radians_from_hardware_thumb_abduction(k: float) -> float:
-    return -0.0012 * k + 1.1641
-
-
-def _build_table(fn, n: int = 1001) -> List[float]:
-    return [fn(float(k)) for k in range(n)]
-
-
-_R_TABLE_FOUR = _build_table(radians_from_hardware_four_fingers)
-_R_TABLE_THUMB_FLEX = _build_table(radians_from_hardware_thumb_flexion)
-
-
-def _hardware_k_thumb_abduction_from_radians(r: float) -> int:
-    """r = -0.0012*k + 1.1641 的闭式逆。"""
-    k = (1.1641 - r) / 0.0012
-    return int(max(0, min(1000, round(k))))
-
-
-def _hardware_k_from_radians_and_table(r: float, table: Sequence[float]) -> int:
-    """
-    table[k]=f(k) 在 [0,1000] 上单调递减时，求最接近目标的整数 k。
-    复杂度：O(log N) 比较，N=1001。
-    """
-    if not math.isfinite(r):
+def hardware_k_from_normalized_position(x: float) -> int:
+    """将模型输出 x∈[-1,1] 线性映射到硬件整数 k∈[0,1000]。"""
+    if not math.isfinite(x):
         return 0
-    if r >= table[0]:
-        return 0
-    if r <= table[1000]:
-        return 1000
-    lo, hi = 0, 1000
-    while lo + 1 < hi:
-        mid = (lo + hi) // 2
-        if table[mid] > r:
-            lo = mid
-        else:
-            hi = mid
-    if abs(table[lo] - r) <= abs(table[hi] - r):
-        return int(lo)
-    return int(hi)
-
-
-def hardware_k_from_radians(r: float, finger_id: int) -> int:
-    if finger_id in (0, 1, 2, 3):
-        return _hardware_k_from_radians_and_table(r, _R_TABLE_FOUR)
-    if finger_id == 4:
-        return _hardware_k_from_radians_and_table(r, _R_TABLE_THUMB_FLEX)
-    if finger_id == 5:
-        return _hardware_k_thumb_abduction_from_radians(r)
-    return _hardware_k_from_radians_and_table(r, _R_TABLE_FOUR)
+    x = max(-1.0, min(1.0, x))
+    k = (x + 1.0) * 500.0
+    return int(round(k))
 
 
 class InspireExecutor(Node):
@@ -141,10 +84,7 @@ class InspireExecutor(Node):
         elif len(pos) > self._n_joints:
             pos = pos[: self._n_joints]
 
-        angles: List[int] = []
-        for i, r in enumerate(pos):
-            fid = int(self._finger_order[i])
-            angles.append(hardware_k_from_radians(r, fid))
+        angles: List[int] = [hardware_k_from_normalized_position(x) for x in pos]
 
         out = SetAngle1()
         out.finger_ids = [int(x) for x in self._finger_order]

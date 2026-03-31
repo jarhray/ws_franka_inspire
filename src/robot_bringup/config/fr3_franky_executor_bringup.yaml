@@ -1,0 +1,46 @@
+fr3_franky_executor:
+  ros__parameters:
+    # 对应 hardware_bringup.launch.py 中的:
+    #   - fr3_state_bridge_joint_topic
+    #   - fr3_state_bridge_pose_topic
+    #   - fr3_state_bridge_twist_topic
+    #   - joint_state_rate
+    #   - fr3_franky_relative_dynamics_factor
+    #   - fr3_state_bridge_controller_mode
+
+    arm_action_topic: /robot/arm_action
+    status_topic: /robot/arm_execution/status
+    error_topic: /robot/arm_execution/error
+    command_timeout_sec: 2.0
+    command_timeout_warn_interval_sec: 15.0
+    status_rate_hz: 5.0
+
+    # hardware_bringup.launch.py 会覆盖这里的 mock_mode/fci_hostname（如果需要）
+    mock_mode: false
+    default_reference_frame: fr3_link0
+
+    # Real robot FCI (hardware_bringup.launch.py 通过 robot_ip 覆盖该值)
+    fci_hostname: "172.16.0.2"
+    # 对应 fr3_state_bridge_controller_mode
+    franky_controller_mode: joint_impedance
+
+    # 对应 fr3_franky_relative_dynamics_factor (0~1: 越大通常越激进/越快，但更容易触发保护)
+    franky_relative_dynamics_factor: 0.2
+
+    default_velocity_duration_sec: 0.1
+    velocity_async: true
+    position_async: true
+
+    # Franka/FR3 links used by franky backend; keep length=7
+    home_joint_position: [0.0, -0.785398, 0.0, -2.35619, 0.0, 1.5708, 0.785398]
+
+    # ---- state publish to keep observation_aggregator compatible ----
+    # 对应 fr3_state_bridge_joint_topic / fr3_state_bridge_pose_topic / fr3_state_bridge_twist_topic
+    state_joint_topic: /franka_robot_state_broadcaster/measured_joint_states
+    state_pose_topic: /franka_robot_state_broadcaster/current_pose
+    state_twist_topic: /franka_robot_state_broadcaster/desired_end_effector_twist
+    # 对应 joint_state_rate
+    state_publish_rate_hz: 30.0
+
+    joint_names: [fr3_joint1, fr3_joint2, fr3_joint3, fr3_joint4, fr3_joint5, fr3_joint6, fr3_joint7]
+
