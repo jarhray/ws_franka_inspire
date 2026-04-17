@@ -12,6 +12,9 @@ geometry_msgs/Twist ee_twist
 float64[] hand_joint_position
 float64[] hand_joint_velocity
 
+# Inspire tactile: normal/tangential forces per finger (same layout as GetTouchAct1.msg).
+service_interfaces/GetTouchAct1 hand_touch
+
 # Latest RealSense images for perception / policy.
 sensor_msgs/Image rgb_image
 sensor_msgs/Image depth_image

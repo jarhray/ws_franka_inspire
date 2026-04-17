@@ -2,11 +2,14 @@
 
 `policy_manager` 负责根据 `policy_type` 选择策略来源，并统一发布 `WholeBodyAction` 给后续 `action_router`。
 
-当前已支持参数切换：`dummy | act`（`bc | vla` 预留）。
+当前已支持参数切换：`dummy | act | act_exp1 | act_exp1_1 | act_exp1_2`（`bc | vla` 预留）。
 其中各模型参数建议放在独立 YAML：
 
 - `config/dummy_policy.yaml`
 - `config/act_policy.yaml`
+- `config/act_exp1_policy.yaml`（与 `exp1_lerobot/meta/info.json` 对齐：30 维 state + RGB/深度，动作为 13 维关节目标）
+- `config/act_exp1_1_policy.yaml`（与 `data_recorded/exp1_1/meta/info.json` 对齐：13 维 state/action，仅 ee_pose+手，RGB/深度）
+- `config/act_exp1_2_policy.yaml`（与 `data_recorded/exp1_2/meta/info.json` 对齐：8 维 state/action，ee_pose+二值抓取，RGB）
 
 ## 功能概览
 
@@ -35,6 +38,7 @@
 - 模型参数（放在模型 YAML）
   - dummy: `publish_rate_hz`、`arm_*`、`hand_*`、`is_relative`
   - act: `act_*`、`arm_reference_frame`、`arm_duration_sec`、`hand_duration_sec`
+  - act_exp1: 同上另有一套 `act_exp1_*`，并包含 RGB（`observation.images.rs_color`）与深度（`observation.rs_depth`，来自 `RobotObservation.depth_image`）
 
 ## 主要参数
 
@@ -56,6 +60,8 @@
 
 ## 构建
 
+请使用工作区内的虚拟环境（与 `torch` / `lerobot` 一致）：
+
 ```bash
 cd ~/ws_franka_inspire
 source .venv/bin/activate
@@ -63,6 +69,8 @@ source /opt/ros/humble/setup.bash
 colcon build --packages-select policy_manager
 source install/setup.bash
 ```
+
+说明：`policy_manager_node` 由该 venv 的 Python 解释器运行（通过 `colcon` 安装后的入口脚本），开发时请在同一 venv 下 `colcon build`，避免系统 Python 缺依赖。
 
 ## 使用方法
 

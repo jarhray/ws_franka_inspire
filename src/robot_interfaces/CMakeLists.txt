@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.16)
 
 project(robot_interfaces)
 
@@ -12,6 +12,7 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
+find_package(service_interfaces REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotObservation.msg"
@@ -22,7 +23,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StopArm.srv"
   "srv/HomeArm.srv"
   "srv/ResetArmFault.srv"
-  DEPENDENCIES std_msgs geometry_msgs sensor_msgs builtin_interfaces
+  DEPENDENCIES std_msgs geometry_msgs sensor_msgs builtin_interfaces service_interfaces
 )
 
 if(BUILD_TESTING)

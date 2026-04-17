@@ -6,6 +6,7 @@ observation_aggregator:
     rs_depth_image_topic: /camera/depth/image_rect_raw
     rs_camera_info_topic: /camera/color/camera_info
     hand_angle_topic: /angle_data
+    hand_touch_topic: /touch_data
     hand_finger_id_order: [0, 1, 2, 3, 4, 5]
     franka_namespace: ""
     franka_state_controller_name: franka_robot_state_broadcaster

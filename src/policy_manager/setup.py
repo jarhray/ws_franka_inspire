@@ -12,13 +12,13 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/config', glob('config/*.yaml')),
     ],
-    install_requires=['setuptools'],
+    install_requires=[],
     zip_safe=True,
     maintainer='policy_manager',
     maintainer_email='todo@todo.todo',
     description='Policy type switcher with dummy WholeBodyAction output.',
     license='MIT',
-    tests_require=['pytest'],
+    extras_require={'test': ['pytest']},
     entry_points={
         'console_scripts': [
             'policy_manager_node = policy_manager.policy_manager_node:main',

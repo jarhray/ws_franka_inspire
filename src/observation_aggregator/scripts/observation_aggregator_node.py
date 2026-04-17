@@ -12,7 +12,7 @@ from geometry_msgs.msg import PoseStamped, TwistStamped
 from robot_interfaces.msg import RobotObservation
 from sensor_msgs.msg import CameraInfo, Image, JointState
 
-from service_interfaces.msg import GetAngleAct1
+from service_interfaces.msg import GetAngleAct1, GetTouchAct1
 
 # ---------------------------------------------------------------------------
 # Inspire 手指标定：硬件寄存器 k∈[0,1000]（整数）→ 关节弧度 r = f(k)。
@@ -101,6 +101,9 @@ class ObservationAggregator(Node):
         ).value
         self.hand_finger_id_order = self.declare_parameter(
             "hand_finger_id_order", [0, 1, 2, 3, 4, 5]
+        ).value
+        self.hand_touch_topic = self.declare_parameter(
+            "hand_touch_topic", "/touch_data"
         ).value
 
         # ---- Parameters (FR3) ----
@@ -214,6 +217,11 @@ class ObservationAggregator(Node):
 
         self.create_subscription(GetAngleAct1, self.hand_angle_topic, self._on_hand_angle, qos)
 
+        self.last_touch_msg: Optional[GetTouchAct1] = None
+        self.last_touch_time: Optional[Time] = None
+        self._last_touch_has_value = False
+        self.create_subscription(GetTouchAct1, self.hand_touch_topic, self._on_hand_touch, qos)
+
         # ---- Subscribers (RealSense) ----
         self.last_rgb_image: Optional[Image] = None
         self.last_depth_image: Optional[Image] = None
@@ -253,6 +261,7 @@ class ObservationAggregator(Node):
         self.get_logger().info(
             f"RealSense RGB: {self.rs_rgb_image_topic} (+ alternates {self.rs_rgb_image_topic_alternates})"
         )
+        self.get_logger().info(f"Inspire touch: {self.hand_touch_topic}")
 
     # ----------------- Callbacks -----------------
     def _on_arm_joint(self, msg: JointState) -> None:
@@ -309,6 +318,11 @@ class ObservationAggregator(Node):
         self._hand_vel_radians = vel_r
         self.last_hand_time = now
         self._last_hand_has_value = True
+
+    def _on_hand_touch(self, msg: GetTouchAct1) -> None:
+        self.last_touch_msg = msg
+        self.last_touch_time = self.get_clock().now()
+        self._last_touch_has_value = True
 
     def _on_rgb_image(self, msg: Image) -> None:
         self.last_rgb_image = msg
@@ -376,6 +390,15 @@ class ObservationAggregator(Node):
             return None
         return max(valid, key=lambda x: x.nanoseconds)
 
+    def _fill_hand_touch(self, obs: RobotObservation) -> None:
+        if not self._last_touch_has_value or self.last_touch_msg is None:
+            return
+        src = self.last_touch_msg
+        obs.hand_touch.finger_ids = list(src.finger_ids)
+        obs.hand_touch.finger_names = list(src.finger_names)
+        obs.hand_touch.normal_forces = list(src.normal_forces)
+        obs.hand_touch.tangential_forces = list(src.tangential_forces)
+
     # ----------------- Timer -----------------
     def _on_timer(self) -> None:
         obs = RobotObservation()
@@ -386,6 +409,7 @@ class ObservationAggregator(Node):
                 self.last_arm_pose_stamp,
                 self.last_arm_twist_stamp,
                 self.last_hand_time,
+                self.last_touch_time,
                 self.last_rs_stamp,
             ]
         )
@@ -406,6 +430,8 @@ class ObservationAggregator(Node):
             hp, hv = self._hand_k_ordered_to_radians()
             obs.hand_joint_position = hp
             obs.hand_joint_velocity = hv
+
+        self._fill_hand_touch(obs)
 
         if self.last_rgb_image is not None:
             obs.rgb_image = self.last_rgb_image

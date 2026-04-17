@@ -1,0 +1,12 @@
+# Python 依赖：在 ws_franka_inspire 下与 .venv 配合使用
+#   source .venv/bin/activate && pip install -r requirements.txt
+#
+# ROS 2（rclpy、ament 等）请用 apt 与 source install/setup.bash，勿用 pip 安装。
+
+# colcon-core 要求 setuptools<80；lerobot 0.4.x 要求 setuptools>=71,<81
+setuptools>=71,<80
+
+lerobot==0.4.4
+
+# 与 NumPy 2.x 匹配的 SciPy；避免运行时落到 /usr/lib 里旧版 SciPy（会报 dtype size changed）
+scipy>=1.11.0

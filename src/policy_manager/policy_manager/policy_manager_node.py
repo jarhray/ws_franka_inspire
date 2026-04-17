@@ -11,6 +11,10 @@ from rclpy.node import Node
 from robot_interfaces.msg import RobotObservation, WholeBodyAction
 from policy_manager.base_policy import BasePolicy
 from policy_manager.act_policy_adapter import ACTPolicyAdapter
+from policy_manager.act_exp1_policy_adapter import ACTExp1PolicyAdapter
+from policy_manager.act_exp1_1_policy_adapter import ACTExp11PolicyAdapter
+from policy_manager.act_exp1_2_policy_adapter import ACTExp12PolicyAdapter
+from policy_manager.act_exp1_3_policy_adapter import ACTExp13PolicyAdapter
 from policy_manager.dummy_policy import DummyPolicy
 
 
@@ -36,12 +40,29 @@ class PolicyManager(Node):
 
         self.create_subscription(RobotObservation, self._observation_topic, self._on_observation, 10)
         self._pub = self.create_publisher(WholeBodyAction, self._whole_body_action_topic, 10)
-        if self._policy_type not in ('dummy', 'bc', 'vla', 'act'):
+        if self._policy_type not in (
+            'dummy',
+            'bc',
+            'vla',
+            'act',
+            'act_exp1',
+            'act_exp1_1',
+            'act_exp1_2',
+            'act_exp1_3',
+        ):
             raise RuntimeError(f'Unknown policy_type={self._policy_type}.')
 
         # 根据 policy_type 选择具体模型，并让模型自己声明/读取所需参数。
         if self._policy_type == 'act':
             self._policy = ACTPolicyAdapter.from_node(self)
+        elif self._policy_type == 'act_exp1':
+            self._policy = ACTExp1PolicyAdapter.from_node(self)
+        elif self._policy_type == 'act_exp1_1':
+            self._policy = ACTExp11PolicyAdapter.from_node(self)
+        elif self._policy_type == 'act_exp1_2':
+            self._policy = ACTExp12PolicyAdapter.from_node(self)
+        elif self._policy_type == 'act_exp1_3':
+            self._policy = ACTExp13PolicyAdapter.from_node(self)
         elif self._policy_type == 'dummy':
             self._policy = DummyPolicy.from_node(self)
         else:

@@ -6,6 +6,7 @@ observation_aggregator:
     rs_depth_image_topic: /camera/depth/image_rect_raw
     rs_camera_info_topic: /camera/color/camera_info
     hand_angle_topic: /angle_data
+    hand_touch_topic: /touch_data
     hand_finger_id_order: [0, 1, 2, 3, 4, 5]
     franka_namespace: ""
     franka_state_controller_name: franka_robot_state_broadcaster
@@ -14,7 +15,7 @@ observation_aggregator:
 
 policy_manager:
   ros__parameters:
-    policy_type: act
+    policy_type: act_exp1_3
     observation_topic: /robot/observation
     whole_body_action_topic: /robot/whole_body_action
     require_observation_before_publish: true
@@ -32,8 +33,9 @@ action_router:
     arm_joint_velocity_limit: 2.0
     cartesian_linear_velocity_max: 1.0
     cartesian_angular_velocity_max: 1.0
-    hand_joint_position_min: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    hand_joint_position_max: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
+    # 与策略 WholeBodyAction 手部一致：归一化 [-1, 1]（覆盖节点内 declare 默认值）
+    hand_joint_position_min: [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
+    hand_joint_position_max: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 fr3_franky_executor:
   ros__parameters:
@@ -51,7 +53,7 @@ fr3_franky_executor:
     franky_controller_mode: joint_impedance
 
     # 0~1: 越大通常越激进/越快，但更容易触发保护（reflex）
-    franky_relative_dynamics_factor: 0.3
+    franky_relative_dynamics_factor: 0.1
 
     default_velocity_duration_sec: 0.1
     velocity_async: true

@@ -129,10 +129,10 @@ class ActionRouter(Node):
         self._duration_max = self.declare_parameter('duration_sec_max', 60.0).get_parameter_value().double_value
 
         self._hand_pos_min = list(
-            self.declare_parameter('hand_joint_position_min', [0.0] * 6).get_parameter_value().double_array_value
+            self.declare_parameter('hand_joint_position_min', [-1.0] * 6).get_parameter_value().double_array_value
         )
         self._hand_pos_max = list(
-            self.declare_parameter('hand_joint_position_max', [1000.0] * 6).get_parameter_value().double_array_value
+            self.declare_parameter('hand_joint_position_max', [1.0] * 6).get_parameter_value().double_array_value
         )
 
         self._last_obs: Optional[RobotObservation] = None

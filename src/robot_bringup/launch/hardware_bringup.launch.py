@@ -78,7 +78,7 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 'serial_no',
-                default_value="''",
+                default_value='_333422302680',
                 description="RealSense serial_no filter; default empty ''",
             ),
             DeclareLaunchArgument(

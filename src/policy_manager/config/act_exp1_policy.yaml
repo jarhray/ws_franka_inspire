@@ -1,0 +1,27 @@
+# 与 exp1_lerobot/meta/info.json 对齐：
+# - fps 10 -> act_exp1_control_hz
+# - observation.state [30], action [13], touch_forces_0..9 [10]
+# - observation.images.rs_color 视频分辨率 480x640（与 info 中 shape 一致）
+# 若你的 checkpoint 训练时用了别的输入分辨率，可改 act_exp1_img_h / act_exp1_img_w。
+policy_manager:
+  ros__parameters:
+    policy_type: act_exp1
+    act_exp1_control_hz: 10.0
+
+    act_exp1_checkpoint_dir: "/home/jhr/lerobot_act_train/exp1/result/checkpoints/last/pretrained_model"
+    act_exp1_device: auto
+    act_exp1_image_key: observation.images.rs_color
+    act_exp1_depth_key: observation.rs_depth
+    act_exp1_use_depth: true
+    act_exp1_state_key: observation.state
+    act_exp1_img_h: 480
+    act_exp1_img_w: 640
+    act_exp1_state_dim: 30
+    act_exp1_action_dim: 13
+    act_exp1_touch_dim: 10
+
+    arm_reference_frame: fr3_link0
+    arm_duration_sec: 0.1
+    hand_duration_sec: 0.1
+    # 与 observation_aggregator / inspire_executor 手指顺序一致；手部弧度会映射为 [-1,1]
+    act_exp1_hand_finger_id_order: [0, 1, 2, 3, 4, 5]

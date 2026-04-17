@@ -1,0 +1,25 @@
+# 与 data_recorded/exp1_2/meta/info.json 对齐：state/action 均为 8（ee_pose + hand_grasp_binary），仅 RGB
+policy_manager:
+  ros__parameters:
+    policy_type: act_exp1_2
+    act_exp1_2_control_hz: 15.0
+
+    act_exp1_2_checkpoint_dir: "/home/jhr/lerobot_act_train/exp1/result_2_1/checkpoints/last/pretrained_model"
+    act_exp1_2_device: auto
+    act_exp1_2_image_key: observation.images.rs_color
+    act_exp1_2_state_key: observation.state
+    act_exp1_2_img_h: 480
+    act_exp1_2_img_w: 640
+    act_exp1_2_state_dim: 8
+    act_exp1_2_action_dim: 8
+
+    arm_reference_frame: fr3_link0
+    arm_duration_sec: 0.1
+    hand_duration_sec: 0.1
+    act_exp1_2_hand_finger_id_order: [0, 1, 2, 3, 4, 5]
+    # 严格对齐 rosbag2lerobot.py：只允许这两种手型。
+    # 观测侧先把 hardware->radians，再与当前 hand_joint_position(弧度)最近邻判别 0/1；
+    # 输出侧按阈值离散后只下发 reset 或 grasp，不做连续插值。
+    act_exp1_2_hand_binary_threshold: 0.5
+    act_exp1_2_hand_binary_reset_hardware: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 0.0]
+    act_exp1_2_hand_binary_grasp_hardware: [500.0, 500.0, 500.0, 500.0, 500.0, 0.0]
