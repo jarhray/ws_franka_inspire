@@ -1,0 +1,40 @@
+# 与 ws_record_data/datasets/exp3_1/meta/info.json 对齐：
+# - observation.state: 8 = [fr3_joint1..7, hand_grasp_binary_0]
+# - action:            8 = [fr3_joint1..7, hand_grasp_binary_0]
+# - 三路 RGB/Depth: cam1/cam3/cam4
+policy_manager:
+  ros__parameters:
+    policy_type: act_exp3_1
+    act_exp3_1_control_hz: 2.0
+
+    act_exp3_1_checkpoint_dir: "/home/jhr/lerobot_act_train/exp3/exp3_1/checkpoints/last/pretrained_model"
+    act_exp3_1_device: auto
+
+    # 按 info.json 的 feature key 一一对应
+    act_exp3_1_image_keys:
+      - observation.images.cam1_color
+      - observation.images.cam3_color
+      - observation.images.cam4_color
+    act_exp3_1_depth_keys:
+      - observation.cam1_depth
+      - observation.cam3_depth
+      - observation.cam4_depth
+    act_exp3_1_camera_ids: [cam1, cam3, cam4]
+    act_exp3_1_depth_camera_ids: [cam1, cam3, cam4]
+    act_exp3_1_use_depth: true
+
+    act_exp3_1_state_key: observation.state
+    act_exp3_1_img_h: 480
+    act_exp3_1_img_w: 640
+    # 与 rosbag2lerobot depth clip 一致
+    act_exp3_1_depth_clip_mm_min: 100.0
+    act_exp3_1_depth_clip_mm_max: 8000.0
+    act_exp3_1_state_dim: 8
+    act_exp3_1_action_dim: 8
+
+    arm_duration_sec: 0.1
+    hand_duration_sec: 0.1
+    act_exp3_1_hand_finger_id_order: [0, 1, 2, 3, 4, 5]
+    act_exp3_1_hand_binary_threshold: 0.5
+    act_exp3_1_hand_binary_reset_hardware: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 0.0]
+    act_exp3_1_hand_binary_grasp_hardware: [500.0, 500.0, 500.0, 500.0, 500.0, 0.0]

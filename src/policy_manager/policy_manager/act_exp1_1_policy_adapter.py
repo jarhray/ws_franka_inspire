@@ -16,6 +16,7 @@ from robot_interfaces.msg import RobotObservation, WholeBodyAction
 
 from policy_manager.act_exp1_policy_adapter import _normalized_position_from_radians
 from policy_manager.base_policy import BasePolicy
+from policy_manager.observation_camera import resolve_observation_images
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,8 @@ class ACTExp11PolicyConfig:
     hand_duration_sec: float
     control_hz: float
     hand_finger_id_order: tuple[int, int, int, int, int, int]
+    obs_camera_id: str = ""
+    obs_depth_camera_id: str = ""
 
 
 class ACTExp11PolicyAdapter(BasePolicy):
@@ -146,6 +149,16 @@ class ACTExp11PolicyAdapter(BasePolicy):
                 f"{p}_hand_finger_id_order must have length 6, got {len(fid)}"
             )
         hand_finger_id_order = tuple(int(x) for x in fid)
+        obs_camera_id = (
+            node.declare_parameter(f"{p}_camera_id", "")
+            .get_parameter_value()
+            .string_value
+        )
+        obs_depth_camera_id = (
+            node.declare_parameter(f"{p}_depth_camera_id", "")
+            .get_parameter_value()
+            .string_value
+        )
 
         config = ACTExp11PolicyConfig(
             checkpoint_dir=checkpoint_dir,
@@ -170,12 +183,15 @@ class ACTExp11PolicyAdapter(BasePolicy):
                 hand_finger_id_order[4],
                 hand_finger_id_order[5],
             ),
+            obs_camera_id=str(obs_camera_id).strip(),
+            obs_depth_camera_id=str(obs_depth_camera_id).strip(),
         )
         adapter = cls(node=node, config=config)
         node.get_logger().info(
             f"ACT exp1_1 policy loaded: checkpoint={checkpoint_dir} "
             f"device={adapter.torch_device} rgb_key={image_key} depth_key={depth_key} "
-            f"use_depth={config.use_depth} state_key={state_key}"
+            f"use_depth={config.use_depth} state_key={state_key} "
+            f"camera_id={config.obs_camera_id!r} depth_camera_id={config.obs_depth_camera_id!r}"
         )
         return adapter
 
@@ -213,7 +229,14 @@ class ACTExp11PolicyAdapter(BasePolicy):
             raise RuntimeError(f"Failed to load ACT exp1_1 policy from {ckpt}") from exc
 
     def _rgb_to_numpy(self, obs: RobotObservation) -> np.ndarray:
-        image = obs.rgb_image
+        image, _, _ = resolve_observation_images(
+            obs,
+            self._config.obs_camera_id,
+            self._config.obs_depth_camera_id,
+            self._node,
+            "_warned_act_exp11_obs_camera",
+            self,
+        )
         if image.height <= 0 or image.width <= 0:
             raise ValueError("rgb_image has invalid width/height")
         channels = 3
@@ -315,11 +338,19 @@ class ACTExp11PolicyAdapter(BasePolicy):
             self._config.state_key: state_t.to(self._torch_device),
         }
         if self._config.use_depth:
-            if obs.depth_image.height <= 0 or obs.depth_image.width <= 0:
+            _, depth_img, _ = resolve_observation_images(
+                obs,
+                self._config.obs_camera_id,
+                self._config.obs_depth_camera_id,
+                self._node,
+                "_warned_act_exp11_obs_camera",
+                self,
+            )
+            if depth_img.height <= 0 or depth_img.width <= 0:
                 raise ValueError(
                     "depth_image missing or empty; required for act_exp1_1_use_depth=true"
                 )
-            depth_hwc = self._depth_to_numpy_hwc3(obs.depth_image)
+            depth_hwc = self._depth_to_numpy_hwc3(depth_img)
             depth_t = torch.from_numpy(depth_hwc).permute(2, 0, 1).unsqueeze(0).float()
             depth_t = F.interpolate(
                 depth_t,

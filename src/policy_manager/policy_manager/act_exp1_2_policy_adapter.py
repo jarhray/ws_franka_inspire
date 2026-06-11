@@ -13,6 +13,7 @@ from rclpy.node import Node
 from robot_interfaces.msg import RobotObservation, WholeBodyAction
 
 from policy_manager.base_policy import BasePolicy
+from policy_manager.observation_camera import resolve_observation_images
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class ACTExp12PolicyConfig:
     hand_binary_threshold: float
     hand_binary_reset_hardware: tuple[float, float, float, float, float, float]
     hand_binary_grasp_hardware: tuple[float, float, float, float, float, float]
+    obs_camera_id: str = ""
 
 
 class ACTExp12PolicyAdapter(BasePolicy):
@@ -83,6 +85,7 @@ class ACTExp12PolicyAdapter(BasePolicy):
         )
         if len(reset) != 6 or len(grasp) != 6:
             raise RuntimeError(f"{p}_hand_binary_(reset|grasp)_hardware must be length 6")
+        obs_camera_id = str(node.declare_parameter(f"{p}_camera_id", "").value or "").strip()
 
         config = ACTExp12PolicyConfig(
             checkpoint_dir=str(checkpoint_dir),
@@ -101,11 +104,12 @@ class ACTExp12PolicyAdapter(BasePolicy):
             hand_binary_threshold=threshold,
             hand_binary_reset_hardware=tuple(float(x) for x in reset),
             hand_binary_grasp_hardware=tuple(float(x) for x in grasp),
+            obs_camera_id=obs_camera_id,
         )
         adapter = cls(node=node, config=config)
         node.get_logger().info(
             f"ACT exp1_2 policy loaded: checkpoint={checkpoint_dir} device={adapter._torch_device} "
-            f"image_key={image_key} state_key={state_key}"
+            f"image_key={image_key} state_key={state_key} camera_id={config.obs_camera_id!r}"
         )
         return adapter
 
@@ -170,7 +174,14 @@ class ACTExp12PolicyAdapter(BasePolicy):
         return policy, preprocessor, postprocessor
 
     def _rgb_to_numpy(self, obs: RobotObservation) -> np.ndarray:
-        image = obs.rgb_image
+        image, _, _ = resolve_observation_images(
+            obs,
+            self._config.obs_camera_id,
+            "",
+            self._node,
+            "_warned_act_exp12_obs_camera",
+            self,
+        )
         if image.height <= 0 or image.width <= 0:
             raise ValueError("rgb_image has invalid width/height")
         expected_min_step = int(image.width) * 3

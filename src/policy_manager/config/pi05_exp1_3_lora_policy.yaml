@@ -1,0 +1,31 @@
+# PI0.5 LoRA（exp1_3）：state/action 为 8（ee_pose + hand_grasp_binary），RGB+深度
+policy_manager:
+  ros__parameters:
+    policy_type: pi05_exp1_3_lora
+    pi05_exp1_3_lora_control_hz: 5.0
+
+    pi05_exp1_3_lora_checkpoint_dir: "/home/jhr/models/pi05_exp1_3_lora/last/pretrained_model"
+    pi05_exp1_3_lora_device: auto
+    # 多相机：与 RobotObservation.camera_ids 中逻辑名一致；空字符串则用聚合器填的 legacy rgb/depth
+    pi05_exp1_3_lora_camera_id: cam1
+    pi05_exp1_3_lora_depth_camera_id: cam1
+    pi05_exp1_3_lora_image_key: observation.images.rs_color
+    pi05_exp1_3_lora_depth_key: observation.rs_depth
+    pi05_exp1_3_lora_use_depth: true
+    pi05_exp1_3_lora_state_key: observation.state
+    pi05_exp1_3_lora_task_text: "pick and place"
+    pi05_exp1_3_lora_img_h: 480
+    pi05_exp1_3_lora_img_w: 640
+    # 与 rosbag2lerobot.py depth_clip_mm 对齐
+    pi05_exp1_3_lora_depth_clip_mm_min: 100.0
+    pi05_exp1_3_lora_depth_clip_mm_max: 8000.0
+    pi05_exp1_3_lora_state_dim: 8
+    pi05_exp1_3_lora_action_dim: 8
+
+    arm_reference_frame: fr3_link0
+    arm_duration_sec: 0.1
+    hand_duration_sec: 0.1
+    pi05_exp1_3_lora_hand_finger_id_order: [0, 1, 2, 3, 4, 5]
+    pi05_exp1_3_lora_hand_binary_threshold: 0.5
+    pi05_exp1_3_lora_hand_binary_reset_hardware: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 0.0]
+    pi05_exp1_3_lora_hand_binary_grasp_hardware: [500.0, 500.0, 500.0, 500.0, 500.0, 0.0]

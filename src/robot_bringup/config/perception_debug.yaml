@@ -2,6 +2,8 @@ observation_aggregator:
   ros__parameters:
     observation_topic: /robot/observation
     publish_rate_hz: 30.0
+    default_camera_id: cam1
+    enabled_cameras: "cam1"
     rs_rgb_image_topic: /camera/color/image_raw
     rs_depth_image_topic: /camera/depth/image_rect_raw
     rs_camera_info_topic: /camera/color/camera_info

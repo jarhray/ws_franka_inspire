@@ -10,7 +10,7 @@
 | FR3 | `geometry_msgs/PoseStamped`（末端位姿） | `ee_pose`、`ee_pose_frame` |
 | FR3 | `geometry_msgs/TwistStamped`（末端 twist，来自 Franka 状态广播中的期望项） | `ee_twist` |
 | Inspire | `service_interfaces/msg/GetAngleAct1`（`angle_data` 等） | 节点内部仍按原样接收 **硬件整数 k**；仅在**发布** `/robot/observation` 时把 k 换成弧度 **r=f(k)** 写入 `hand_joint_position`，`hand_joint_velocity` 为 **rad/s**（对 r 的差分）。与 `inspire_executor` 成对。 |
-| RealSense | `sensor_msgs/Image` / `CameraInfo` | `rgb_image`、`depth_image`、`camera_info` |
+| RealSense | `sensor_msgs/Image` / `CameraInfo` | `rgb_image`、`depth_image`、`camera_info`；多路时另写入 `camera_ids` / `rgb_images` / `depth_images` / `camera_infos`（并行数组） |
 
 ## 依赖
 
@@ -97,6 +97,29 @@ ros2 run observation_aggregator observation_aggregator_node
 | `rs_depth_image_topic` | string | `/camera/depth/image_rect_raw` | 深度图像 |
 | `rs_camera_info_topic` | string | `/camera/color/camera_info` | 相机标定（常与 RGB 对齐） |
 | `rs_rgb_image_topic_alternates` 等 | string[] | 见代码默认 | 与主 `rs_*` 并行订阅的备选 topic（嵌套相机名时常用） |
+| `enabled_cameras` | string | `""` | **推荐**：逗号分隔逻辑名（与 `robot_bringup/hardware_bringup.launch.py` 的 `enabled_cameras` 一致）。非空时覆盖 `observation_camera_ids`，并按 `/id/id/color|depth|camera_info` 自动订阅 |
+| `observation_camera_ids` | string[] | `[]` | **非空则启用多相机模式**（此时不再订阅 `rs_*`）。若 RGB/Depth topic 列表均为空，则按与 `enabled_cameras` 相同的 RealSense 布局自动生成 topic |
+| `observation_camera_rgb_topics` | string[] | `[]` | 与 `observation_camera_ids` 等长；或留空以启用上条自动布局 |
+| `observation_camera_depth_topics` | string[] | `[]` | 同上 |
+| `observation_camera_info_topics` | string[] | `[]` | 与上等长；留空则自动订阅各路 `color/camera_info`；可填 `""` 跳过该路订阅 |
+| `default_camera_id` | string | `cam1` | 写入 legacy `rgb_image`/`depth_image`/`camera_info` 时选用的逻辑相机名 |
+
+多相机示例（与 `hardware_bringup` 对齐，一行即可）：
+
+```yaml
+enabled_cameras: "cam1,cam3"
+default_camera_id: cam1
+```
+
+等价写法（手写 topic，适用于非标准命名空间）：
+
+```yaml
+observation_camera_ids: [cam1, cam3]
+observation_camera_rgb_topics: [/cam1/cam1/color/image_raw, /cam3/cam3/color/image_raw]
+observation_camera_depth_topics: [/cam1/cam1/depth/image_rect_raw, /cam3/cam3/depth/image_rect_raw]
+observation_camera_info_topics: [/cam1/cam1/color/camera_info, /cam3/cam3/color/camera_info]
+default_camera_id: cam1
+```
 
 命令行覆盖示例：
 

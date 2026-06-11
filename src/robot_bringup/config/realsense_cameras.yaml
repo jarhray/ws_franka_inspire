@@ -1,0 +1,45 @@
+# RealSense 多路配置（由 hardware_bringup.launch.py 读取）。
+# 仅启动 launch 参数 enabled_cameras 中列出的 camera_name；未列出的条目可保留作模板。
+#
+# 常用字段与 realsense2_camera rs_launch 的对应关系：
+#   color_profile  -> rgb_camera.color_profile   （格式 width,height,fps）
+#   depth_profile  -> depth_module.depth_profile
+# 其余与 rs_launch DeclareLaunchArgument 同名的键（如 enable_sync、align_depth.enable）
+# 若写在下列 cameras 条目中，会原样传入（布尔会转为 true/false 字符串）。
+
+cameras:
+  - camera_name: cam1
+    serial_no: "_333422300857"
+    color_profile: "640,480,15"
+    depth_profile: "640,480,15"
+    enable_color: true
+    enable_depth: true
+    initial_reset: false
+    enable_sync: true
+
+  - camera_name: cam2
+    serial_no: "_333422301952"
+    color_profile: "640,480,15"
+    depth_profile: "640,480,15"
+    enable_color: true
+    enable_depth: true
+    initial_reset: false
+    enable_sync: true
+
+  - camera_name: cam3
+    serial_no: "_336222300912"
+    color_profile: "640,480,15"
+    depth_profile: "640,480,15"
+    enable_color: true
+    enable_depth: true
+    initial_reset: false
+    enable_sync: true
+
+  - camera_name: cam4
+    serial_no: "_333422302680"
+    color_profile: "640,480,15"
+    depth_profile: "640,480,15"
+    enable_color: true
+    enable_depth: true
+    initial_reset: false
+    enable_sync: true

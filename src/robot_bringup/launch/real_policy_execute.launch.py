@@ -36,13 +36,18 @@ def _build_nodes(context, bringup_share: str, policy_manager_share: str):
     else:
         policy_params_file_path = policy_params_file_arg
 
+    enabled_cameras = LaunchConfiguration('enabled_cameras').perform(context).strip()
+    obs_parameters = [params_file_path]
+    if enabled_cameras:
+        obs_parameters.append({'ros__parameters': {'enabled_cameras': enabled_cameras}})
+
     return [
         Node(
             package='observation_aggregator',
             executable='observation_aggregator_node',
             name='observation_aggregator',
             output='screen',
-            parameters=[params_file_path],
+            parameters=obs_parameters,
         ),
         Node(
             package='policy_manager',
@@ -90,6 +95,11 @@ def generate_launch_description() -> LaunchDescription:
                 'policy_params_file',
                 default_value='auto',
                 description='Model YAML for policy_manager. Use auto to choose by policy_type in params_file.',
+            ),
+            DeclareLaunchArgument(
+                'enabled_cameras',
+                default_value='',
+                description='If non-empty, overrides observation_aggregator enabled_cameras (e.g. cam1,cam3); must match hardware_bringup.',
             ),
             OpaqueFunction(
                 function=lambda context: _build_nodes(

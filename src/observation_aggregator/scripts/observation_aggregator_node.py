@@ -95,6 +95,101 @@ class ObservationAggregator(Node):
             ["/camera/camera/color/camera_info"],
         ).value
 
+        # ---- Parameters (multi-camera) ----
+        # ``enabled_cameras``: comma-separated ids matching hardware_bringup.launch.py
+        # (e.g. cam1,cam3). When non-empty, overrides observation_camera_ids and auto-subscribes to
+        # /{id}/{id}/color/image_raw, /{id}/{id}/depth/image_rect_raw, /{id}/{id}/color/camera_info
+        # (same camera_name + camera_namespace layout as rs_launch for each RealSense).
+        self.enabled_cameras = str(
+            self.declare_parameter("enabled_cameras", "").value or ""
+        ).strip()
+
+        self.observation_camera_ids = list(
+            self.declare_parameter("observation_camera_ids", []).value or []
+        )
+        self.observation_camera_rgb_topics = list(
+            self.declare_parameter("observation_camera_rgb_topics", []).value or []
+        )
+        self.observation_camera_depth_topics = list(
+            self.declare_parameter("observation_camera_depth_topics", []).value or []
+        )
+        self.observation_camera_info_topics = list(
+            self.declare_parameter("observation_camera_info_topics", []).value or []
+        )
+        self.default_camera_id = str(
+            self.declare_parameter("default_camera_id", "cam1").value or "cam1"
+        )
+
+        if self.enabled_cameras:
+            self.observation_camera_ids = [
+                x.strip() for x in self.enabled_cameras.split(",") if x.strip()
+            ]
+            if not self.observation_camera_ids:
+                raise ValueError("enabled_cameras is non-empty but parses to no camera ids")
+            self.observation_camera_rgb_topics = []
+            self.observation_camera_depth_topics = []
+            self.observation_camera_info_topics = []
+
+        n_ids = len(self.observation_camera_ids)
+        auto_topics = False
+        if n_ids > 0:
+            n_rgb = len(self.observation_camera_rgb_topics)
+            n_dep = len(self.observation_camera_depth_topics)
+            auto_topics = n_rgb == 0 and n_dep == 0
+            if auto_topics:
+                for cid in self.observation_camera_ids:
+                    c = str(cid).strip()
+                    self.observation_camera_rgb_topics.append(f"/{c}/{c}/color/image_raw")
+                    self.observation_camera_depth_topics.append(
+                        f"/{c}/{c}/depth/image_rect_raw"
+                    )
+                n_info = len(self.observation_camera_info_topics)
+                if n_info == 0:
+                    for cid in self.observation_camera_ids:
+                        c = str(cid).strip()
+                        self.observation_camera_info_topics.append(
+                            f"/{c}/{c}/color/camera_info"
+                        )
+                elif n_info != n_ids:
+                    raise ValueError(
+                        "With auto topic layout, observation_camera_info_topics must be "
+                        "empty (use default color camera_info per camera) or same length as "
+                        "observation_camera_ids"
+                    )
+            elif n_rgb != n_ids or n_dep != n_ids:
+                raise ValueError(
+                    "observation_camera_ids length must match "
+                    "observation_camera_rgb_topics and observation_camera_depth_topics "
+                    "(or leave rgb/depth topic lists empty for auto layout)"
+                )
+            if len(self.observation_camera_info_topics) == 0:
+                self.observation_camera_info_topics = [""] * n_ids
+            elif len(self.observation_camera_info_topics) != n_ids:
+                raise ValueError(
+                    "observation_camera_info_topics must be empty (skip all info) or "
+                    "same length as observation_camera_ids"
+                )
+
+        self._multi_camera_mode = n_ids > 0
+        if self._multi_camera_mode and self.enabled_cameras:
+            self.get_logger().info(
+                f"enabled_cameras={self.enabled_cameras!r} -> topics aligned with "
+                f"hardware_bringup /{{id}}/{{id}}/..."
+            )
+        elif self._multi_camera_mode and auto_topics:
+            self.get_logger().info(
+                "Multi-camera: auto RealSense topics /{id}/{id}/color|depth|camera_info "
+                f"for ids={self.observation_camera_ids!r}"
+            )
+
+        # Per-camera caches (multi mode)
+        self._mc_order: List[str] = list(self.observation_camera_ids)
+        self._mc_rgb: Dict[str, Optional[Image]] = {c: None for c in self._mc_order}
+        self._mc_depth: Dict[str, Optional[Image]] = {c: None for c in self._mc_order}
+        self._mc_info: Dict[str, Optional[CameraInfo]] = {c: None for c in self._mc_order}
+        self._mc_stamp: Dict[str, Optional[Time]] = {c: None for c in self._mc_order}
+        self._warned_bad_default_cam = False
+
         # ---- Parameters (Inspire) ----
         self.hand_angle_topic = self.declare_parameter(
             "hand_angle_topic", "/angle_data"
@@ -228,20 +323,45 @@ class ObservationAggregator(Node):
         self.last_camera_info: Optional[CameraInfo] = None
         self.last_rs_stamp: Optional[Time] = None
 
-        self.create_subscription(Image, self.rs_rgb_image_topic, self._on_rgb_image, qos)
-        self.create_subscription(Image, self.rs_depth_image_topic, self._on_depth_image, qos)
-        self.create_subscription(
-            CameraInfo, self.rs_camera_info_topic, self._on_camera_info, qos
-        )
-        for alt in self.rs_rgb_image_topic_alternates:
-            if alt and alt != self.rs_rgb_image_topic:
-                self.create_subscription(Image, alt, self._on_rgb_image, qos)
-        for alt in self.rs_depth_image_topic_alternates:
-            if alt and alt != self.rs_depth_image_topic:
-                self.create_subscription(Image, alt, self._on_depth_image, qos)
-        for alt in self.rs_camera_info_topic_alternates:
-            if alt and alt != self.rs_camera_info_topic:
-                self.create_subscription(CameraInfo, alt, self._on_camera_info, qos)
+        if self._multi_camera_mode:
+            for i, cam_id in enumerate(self._mc_order):
+                cid = str(cam_id)
+                t_rgb = str(self.observation_camera_rgb_topics[i]).strip()
+                t_depth = str(self.observation_camera_depth_topics[i]).strip()
+                t_info = str(self.observation_camera_info_topics[i]).strip()
+                if not t_rgb or not t_depth:
+                    raise ValueError(
+                        f"Multi-camera {cid}: rgb/depth topic must be non-empty "
+                        f"(got rgb={t_rgb!r} depth={t_depth!r})"
+                    )
+                self.create_subscription(
+                    Image, t_rgb, self._make_mc_rgb_cb(cid), qos
+                )
+                self.create_subscription(
+                    Image, t_depth, self._make_mc_depth_cb(cid), qos
+                )
+                if t_info:
+                    self.create_subscription(
+                        CameraInfo, t_info, self._make_mc_info_cb(cid), qos
+                    )
+            self.get_logger().info(
+                f"Multi-camera mode: {self._mc_order} default_legacy_mirror={self.default_camera_id!r}"
+            )
+        else:
+            self.create_subscription(Image, self.rs_rgb_image_topic, self._on_rgb_image, qos)
+            self.create_subscription(Image, self.rs_depth_image_topic, self._on_depth_image, qos)
+            self.create_subscription(
+                CameraInfo, self.rs_camera_info_topic, self._on_camera_info, qos
+            )
+            for alt in self.rs_rgb_image_topic_alternates:
+                if alt and alt != self.rs_rgb_image_topic:
+                    self.create_subscription(Image, alt, self._on_rgb_image, qos)
+            for alt in self.rs_depth_image_topic_alternates:
+                if alt and alt != self.rs_depth_image_topic:
+                    self.create_subscription(Image, alt, self._on_depth_image, qos)
+            for alt in self.rs_camera_info_topic_alternates:
+                if alt and alt != self.rs_camera_info_topic:
+                    self.create_subscription(CameraInfo, alt, self._on_camera_info, qos)
 
         # ---- Publisher ----
         self.observation_pub = self.create_publisher(RobotObservation, self.observation_topic, 10)
@@ -258,10 +378,45 @@ class ObservationAggregator(Node):
             "Note: with use_fake_hardware:=true, franka_robot_state_broadcaster is not loaded; "
             "use /franka/joint_states or /joint_states (see arm_joint_state_extra_topics)."
         )
-        self.get_logger().info(
-            f"RealSense RGB: {self.rs_rgb_image_topic} (+ alternates {self.rs_rgb_image_topic_alternates})"
-        )
+        if not self._multi_camera_mode:
+            self.get_logger().info(
+                f"RealSense RGB: {self.rs_rgb_image_topic} "
+                f"(+ alternates {self.rs_rgb_image_topic_alternates})"
+            )
         self.get_logger().info(f"Inspire touch: {self.hand_touch_topic}")
+
+    def _merge_rs_stamp(self, t: Optional[Time]) -> None:
+        if t is None:
+            return
+        if self.last_rs_stamp is None or t.nanoseconds > self.last_rs_stamp.nanoseconds:
+            self.last_rs_stamp = t
+
+    def _make_mc_rgb_cb(self, cam_id: str):
+        def _cb(msg: Image) -> None:
+            self._mc_rgb[cam_id] = msg
+            tt = _time_from_msg(self, msg.header.stamp)
+            self._mc_stamp[cam_id] = tt
+            self._merge_rs_stamp(tt)
+
+        return _cb
+
+    def _make_mc_depth_cb(self, cam_id: str):
+        def _cb(msg: Image) -> None:
+            self._mc_depth[cam_id] = msg
+            tt = _time_from_msg(self, msg.header.stamp)
+            self._mc_stamp[cam_id] = tt
+            self._merge_rs_stamp(tt)
+
+        return _cb
+
+    def _make_mc_info_cb(self, cam_id: str):
+        def _cb(msg: CameraInfo) -> None:
+            self._mc_info[cam_id] = msg
+            tt = _time_from_msg(self, msg.header.stamp)
+            self._mc_stamp[cam_id] = tt
+            self._merge_rs_stamp(tt)
+
+        return _cb
 
     # ----------------- Callbacks -----------------
     def _on_arm_joint(self, msg: JointState) -> None:
@@ -326,15 +481,15 @@ class ObservationAggregator(Node):
 
     def _on_rgb_image(self, msg: Image) -> None:
         self.last_rgb_image = msg
-        self.last_rs_stamp = _time_from_msg(self, msg.header.stamp)
+        self._merge_rs_stamp(_time_from_msg(self, msg.header.stamp))
 
     def _on_depth_image(self, msg: Image) -> None:
         self.last_depth_image = msg
-        self.last_rs_stamp = _time_from_msg(self, msg.header.stamp)
+        self._merge_rs_stamp(_time_from_msg(self, msg.header.stamp))
 
     def _on_camera_info(self, msg: CameraInfo) -> None:
         self.last_camera_info = msg
-        self.last_rs_stamp = _time_from_msg(self, msg.header.stamp)
+        self._merge_rs_stamp(_time_from_msg(self, msg.header.stamp))
 
     # ----------------- Helpers -----------------
     def _build_arm_positions(self) -> List[float]:
@@ -433,12 +588,42 @@ class ObservationAggregator(Node):
 
         self._fill_hand_touch(obs)
 
-        if self.last_rgb_image is not None:
-            obs.rgb_image = self.last_rgb_image
-        if self.last_depth_image is not None:
-            obs.depth_image = self.last_depth_image
-        if self.last_camera_info is not None:
-            obs.camera_info = self.last_camera_info
+        if self._multi_camera_mode:
+            obs.camera_ids = list(self._mc_order)
+            obs.rgb_images = []
+            obs.depth_images = []
+            obs.camera_infos = []
+            for cid in self._mc_order:
+                r = self._mc_rgb.get(cid)
+                d = self._mc_depth.get(cid)
+                info = self._mc_info.get(cid)
+                obs.rgb_images.append(r if r is not None else Image())
+                obs.depth_images.append(d if d is not None else Image())
+                obs.camera_infos.append(info if info is not None else CameraInfo())
+
+            primary = self.default_camera_id.strip()
+            if primary not in self._mc_order:
+                primary = self._mc_order[0]
+                if not self._warned_bad_default_cam:
+                    self.get_logger().warn(
+                        f"default_camera_id={self.default_camera_id!r} not in {self._mc_order}; "
+                        f"using {primary!r} for legacy rgb_image/depth_image/camera_info mirror."
+                    )
+                    self._warned_bad_default_cam = True
+            pidx = self._mc_order.index(primary)
+            if pidx < len(obs.rgb_images) and obs.rgb_images[pidx].height > 0:
+                obs.rgb_image = obs.rgb_images[pidx]
+            if pidx < len(obs.depth_images) and obs.depth_images[pidx].height > 0:
+                obs.depth_image = obs.depth_images[pidx]
+            if pidx < len(obs.camera_infos):
+                obs.camera_info = obs.camera_infos[pidx]
+        else:
+            if self.last_rgb_image is not None:
+                obs.rgb_image = self.last_rgb_image
+            if self.last_depth_image is not None:
+                obs.depth_image = self.last_depth_image
+            if self.last_camera_info is not None:
+                obs.camera_info = self.last_camera_info
 
         self.observation_pub.publish(obs)
 

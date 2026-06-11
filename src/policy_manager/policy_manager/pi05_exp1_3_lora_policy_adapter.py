@@ -1,4 +1,4 @@
-"""ACT adapter for dataset layout in data_recorded/exp1_3/meta/info.json (8-dim state/action + RGB/depth)."""
+"""PI0.5 LoRA adapter for exp1_3 layout (8-dim state/action + RGB/depth)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from policy_manager.observation_camera import resolve_observation_images
 
 
 @dataclass(frozen=True)
-class ACTExp13PolicyConfig:
+class PI05Exp13LoraPolicyConfig:
     checkpoint_dir: str
     device: str
     image_key: str
@@ -32,6 +32,7 @@ class ACTExp13PolicyConfig:
     depth_clip_mm_max: float
     state_dim: int
     action_dim: int
+    task_text: str
     arm_reference_frame: str
     arm_duration_sec: float
     hand_duration_sec: float
@@ -44,10 +45,10 @@ class ACTExp13PolicyConfig:
     obs_depth_camera_id: str = ""
 
 
-class ACTExp13PolicyAdapter(BasePolicy):
-    """Matches exp1_3 / info.json: observation.state(8), action(8), RGB + depth."""
+class PI05Exp13LoraPolicyAdapter(BasePolicy):
+    """Matches exp1_3 info.json and pi05 LoRA pre/post processors."""
 
-    def __init__(self, node: Node, config: ACTExp13PolicyConfig) -> None:
+    def __init__(self, node: Node, config: PI05Exp13LoraPolicyConfig) -> None:
         self._node = node
         self._config = config
         self._torch_device = self._resolve_torch_device(config.device)
@@ -61,15 +62,14 @@ class ACTExp13PolicyAdapter(BasePolicy):
 
     @classmethod
     def from_node(cls, node: Node) -> "BasePolicy":
-        p = "act_exp1_3"
+        p = "pi05_exp1_3_lora"
         checkpoint_dir = node.declare_parameter(f"{p}_checkpoint_dir", "").value
         device = node.declare_parameter(f"{p}_device", "auto").value
-        image_key = node.declare_parameter(
-            f"{p}_image_key", "observation.images.rs_color"
-        ).value
+        image_key = node.declare_parameter(f"{p}_image_key", "observation.images.rs_color").value
         depth_key = node.declare_parameter(f"{p}_depth_key", "observation.rs_depth").value
         use_depth = bool(node.declare_parameter(f"{p}_use_depth", True).value)
         state_key = node.declare_parameter(f"{p}_state_key", "observation.state").value
+        task_text = node.declare_parameter(f"{p}_task_text", "pick and place").value
         img_h = int(node.declare_parameter(f"{p}_img_h", 480).value)
         img_w = int(node.declare_parameter(f"{p}_img_w", 640).value)
         depth_clip_mm_min = float(node.declare_parameter(f"{p}_depth_clip_mm_min", 100.0).value)
@@ -101,7 +101,7 @@ class ACTExp13PolicyAdapter(BasePolicy):
             node.declare_parameter(f"{p}_depth_camera_id", "").value or ""
         ).strip()
 
-        config = ACTExp13PolicyConfig(
+        config = PI05Exp13LoraPolicyConfig(
             checkpoint_dir=str(checkpoint_dir),
             device=str(device),
             image_key=str(image_key),
@@ -114,6 +114,7 @@ class ACTExp13PolicyAdapter(BasePolicy):
             depth_clip_mm_max=depth_clip_mm_max,
             state_dim=state_dim,
             action_dim=action_dim,
+            task_text=str(task_text),
             arm_reference_frame=str(arm_reference_frame),
             arm_duration_sec=arm_duration_sec,
             hand_duration_sec=hand_duration_sec,
@@ -127,8 +128,9 @@ class ACTExp13PolicyAdapter(BasePolicy):
         )
         adapter = cls(node=node, config=config)
         node.get_logger().info(
-            f"ACT exp1_3 policy loaded: checkpoint={checkpoint_dir} device={adapter._torch_device} "
-            f"rgb_key={image_key} depth_key={depth_key} use_depth={config.use_depth} state_key={state_key} "
+            f"PI05 exp1_3 LoRA policy loaded: checkpoint={checkpoint_dir} device={adapter._torch_device} "
+            f"rgb_key={image_key} depth_key={depth_key} use_depth={config.use_depth} "
+            f"state_key={state_key} task_text='{config.task_text}' "
             f"camera_id={config.obs_camera_id!r} depth_camera_id={config.obs_depth_camera_id!r}"
         )
         return adapter
@@ -157,31 +159,43 @@ class ACTExp13PolicyAdapter(BasePolicy):
 
     @staticmethod
     def _normalized_from_hardware(k: float) -> float:
-        # inspire_executor: k = (x + 1) * 500  =>  x = k / 500 - 1
         return float(np.clip((k / 500.0) - 1.0, -1.0, 1.0))
 
     def _resolve_torch_device(self, requested: str) -> str:
         if requested == "auto":
             return "cuda" if torch.cuda.is_available() else "cpu"
         if requested not in ("cpu", "cuda"):
-            raise RuntimeError(f"Invalid act_exp1_3_device={requested}, expected auto|cpu|cuda")
+            raise RuntimeError(f"Invalid pi05_exp1_3_lora_device={requested}, expected auto|cpu|cuda")
         if requested == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("act_exp1_3_device=cuda but CUDA is not available")
+            raise RuntimeError("pi05_exp1_3_lora_device=cuda but CUDA is not available")
         return requested
 
     def _load_policy_bundle(self, checkpoint_dir: str) -> tuple[Any, Any, Any]:
         from lerobot.configs.policies import PreTrainedConfig
-        from lerobot.policies.act.modeling_act import ACTPolicy
         from lerobot.policies.factory import make_pre_post_processors
+        from lerobot.policies.pi05.modeling_pi05 import PI05Policy
 
         if not checkpoint_dir:
-            raise RuntimeError("act_exp1_3_checkpoint_dir is empty while policy_type=act_exp1_3")
+            raise RuntimeError("pi05_exp1_3_lora_checkpoint_dir is empty while policy_type=pi05_exp1_3_lora")
         ckpt = Path(checkpoint_dir)
         if not ckpt.exists():
-            raise RuntimeError(f"ACT exp1_3 checkpoint dir does not exist: {ckpt}")
+            raise RuntimeError(f"PI05 exp1_3 LoRA checkpoint dir does not exist: {ckpt}")
+
         policy_cfg = PreTrainedConfig.from_pretrained(str(ckpt))
         policy_cfg.device = self._torch_device
-        policy = ACTPolicy.from_pretrained(str(ckpt), config=policy_cfg)
+
+        if bool(getattr(policy_cfg, "use_peft", False)):
+            from peft import PeftConfig, PeftModel
+
+            peft_cfg = PeftConfig.from_pretrained(str(ckpt))
+            base_path = peft_cfg.base_model_name_or_path
+            if not base_path:
+                raise RuntimeError("LoRA adapter has empty base_model_name_or_path")
+            policy = PI05Policy.from_pretrained(base_path, config=policy_cfg)
+            policy = PeftModel.from_pretrained(policy, str(ckpt), config=peft_cfg)
+        else:
+            policy = PI05Policy.from_pretrained(str(ckpt), config=policy_cfg)
+
         policy.to(self._torch_device)
         policy.eval()
         preprocessor, postprocessor = make_pre_post_processors(
@@ -189,6 +203,9 @@ class ACTExp13PolicyAdapter(BasePolicy):
             pretrained_path=str(ckpt),
             preprocessor_overrides={
                 "device_processor": {"device": self._torch_device},
+            },
+            postprocessor_overrides={
+                "device_processor": {"device": "cpu"},
             },
         )
         return policy, preprocessor, postprocessor
@@ -199,7 +216,7 @@ class ACTExp13PolicyAdapter(BasePolicy):
             self._config.obs_camera_id,
             self._config.obs_depth_camera_id,
             self._node,
-            "_warned_act_exp13_obs_camera",
+            "_warned_pi05_obs_camera",
             self,
         )
         if image.height <= 0 or image.width <= 0:
@@ -254,10 +271,9 @@ class ACTExp13PolicyAdapter(BasePolicy):
             depth_mm = cv2.resize(
                 depth_mm, (self._config.img_w, self._config.img_h), interpolation=cv2.INTER_NEAREST
             )
-            rgb = self._depth_to_rgb_u8(
-                depth_mm, (self._config.depth_clip_mm_min, self._config.depth_clip_mm_max)
+            return np.ascontiguousarray(
+                self._depth_to_rgb_u8(depth_mm, (self._config.depth_clip_mm_min, self._config.depth_clip_mm_max))
             )
-            return np.ascontiguousarray(rgb)
 
         if enc == "32fc1":
             if step < w * 4:
@@ -266,10 +282,9 @@ class ACTExp13PolicyAdapter(BasePolicy):
             depth_mm = cv2.resize(
                 depth_mm, (self._config.img_w, self._config.img_h), interpolation=cv2.INTER_NEAREST
             )
-            rgb = self._depth_to_rgb_u8(
-                depth_mm, (self._config.depth_clip_mm_min, self._config.depth_clip_mm_max)
+            return np.ascontiguousarray(
+                self._depth_to_rgb_u8(depth_mm, (self._config.depth_clip_mm_min, self._config.depth_clip_mm_max))
             )
-            return np.ascontiguousarray(rgb)
 
         if enc in ("rgb8", "bgr8", "8uc3"):
             if step < w * 3:
@@ -323,17 +338,20 @@ class ACTExp13PolicyAdapter(BasePolicy):
         state[6] = float(obs.ee_pose.orientation.w)
         state[7] = self._build_obs_hand_binary(obs)
         if self._config.state_dim != 8:
-            raise ValueError(f"act_exp1_3_state_dim must be 8 for this layout, got {self._config.state_dim}")
+            raise ValueError(
+                f"pi05_exp1_3_lora_state_dim must be 8 for this layout, got {self._config.state_dim}"
+            )
         return state
 
     def _build_batch(self, obs: RobotObservation) -> Dict[str, torch.Tensor]:
         rgb = self._rgb_to_numpy(obs)
         state = self._build_state(obs)
-        obs_t: Dict[str, torch.Tensor] = {
+        batch: Dict[str, Any] = {
             self._config.image_key: (
                 torch.from_numpy(rgb).permute(2, 0, 1).contiguous().float().unsqueeze(0) / 255.0
             ).to(self._torch_device),
             self._config.state_key: torch.from_numpy(state).unsqueeze(0).to(self._torch_device),
+            "task": self._config.task_text,
         }
         if self._config.use_depth:
             _, depth_img, _ = resolve_observation_images(
@@ -341,34 +359,33 @@ class ACTExp13PolicyAdapter(BasePolicy):
                 self._config.obs_camera_id,
                 self._config.obs_depth_camera_id,
                 self._node,
-                "_warned_act_exp13_obs_camera",
+                "_warned_pi05_obs_camera",
                 self,
             )
             if depth_img.height <= 0 or depth_img.width <= 0:
-                raise ValueError("depth_image missing or empty; required for act_exp1_3_use_depth=true")
+                raise ValueError("depth_image missing or empty; required for pi05_exp1_3_lora_use_depth=true")
             depth_hwc = self._depth_to_numpy_hwc3(depth_img)
-            obs_t[self._config.depth_key] = (
+            batch[self._config.depth_key] = (
                 torch.from_numpy(depth_hwc).permute(2, 0, 1).contiguous().float().unsqueeze(0) / 255.0
             ).to(self._torch_device)
-
-        return self._preprocessor(obs_t)
+        return self._preprocessor(batch)
 
     def _decode_action(self, action_out: Any) -> np.ndarray:
         if isinstance(action_out, dict):
             action_out = action_out.get("action", next(iter(action_out.values())))
         if not isinstance(action_out, torch.Tensor):
-            raise TypeError(f"ACT output is not Tensor: {type(action_out)}")
+            raise TypeError(f"PI05 output is not Tensor: {type(action_out)}")
         action = action_out.detach().float().cpu()
         if action.ndim == 2:
             action = action[0]
         elif action.ndim == 3:
             action = action[0, 0]
         else:
-            raise ValueError(f"Unsupported ACT output shape: {tuple(action.shape)}")
+            raise ValueError(f"Unsupported PI05 output shape: {tuple(action.shape)}")
         action_np = action.numpy()
         if action_np.shape != (self._config.action_dim,):
             raise ValueError(
-                f"ACT action shape mismatch: got {action_np.shape}, expected ({self._config.action_dim},)"
+                f"PI05 action shape mismatch: got {action_np.shape}, expected ({self._config.action_dim},)"
             )
         return action_np
 

@@ -3,7 +3,7 @@
 <package format="3">
   <name>policy_manager</name>
   <version>0.1.0</version>
-  <description>Policy manager with policy_type switch and dummy action output.</description>
+  <description>Policy manager: dummy, ACT (lerobot), and other adapters publishing WholeBodyAction.</description>
   <maintainer email="todo@todo.todo">policy_manager</maintainer>
   <license>MIT</license>
 

@@ -2,6 +2,11 @@ observation_aggregator:
   ros__parameters:
     observation_topic: /robot/observation
     publish_rate_hz: 30.0
+    # 与 hardware_bringup.launch.py 的 enabled_cameras 对齐（逗号分隔，如 cam1,cam3）。
+    # 非空时按 /{id}/{id}/color|depth|camera_info 自动订阅多路 RealSense，并填充 RobotObservation 并行数组。
+    default_camera_id: cam1
+    enabled_cameras: "cam1,cam3,cam4"
+    # 单相机遗留（仅当 observation_camera_ids: [] 时生效）
     rs_rgb_image_topic: /camera/color/image_raw
     rs_depth_image_topic: /camera/depth/image_rect_raw
     rs_camera_info_topic: /camera/color/camera_info
@@ -13,9 +18,15 @@ observation_aggregator:
     ros2_control_node_name: ros2_control_node
     arm_joint_name_order: []
 
+# 切换策略：修改 policy_type；policy_params_file:=auto 时会自动加载
+#   policy_manager/config/{policy_type}_policy.yaml（例如 act -> act_policy.yaml）。
+# ACT（与 act_eg.py / DemoGrasp 对齐，13 维 state/action）示例：将下一行改为 policy_type: act
+# 并确保 src/policy_manager/config/act_policy.yaml 中 checkpoint 路径正确。
 policy_manager:
   ros__parameters:
-    policy_type: act_exp1_3
+    # policy_type: act_exp3_0
+    policy_type: act_exp3_1
+    # policy_type: act_exp3_5_det
     observation_topic: /robot/observation
     whole_body_action_topic: /robot/whole_body_action
     require_observation_before_publish: true
@@ -53,7 +64,8 @@ fr3_franky_executor:
     franky_controller_mode: joint_impedance
 
     # 0~1: 越大通常越激进/越快，但更容易触发保护（reflex）
-    franky_relative_dynamics_factor: 0.1
+    # franky_relative_dynamics_factor: 0.075
+    franky_relative_dynamics_factor: 0.25
 
     default_velocity_duration_sec: 0.1
     velocity_async: true

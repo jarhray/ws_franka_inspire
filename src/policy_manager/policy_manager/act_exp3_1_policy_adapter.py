@@ -1,4 +1,4 @@
-"""ACT adapter for dataset layout in data_recorded/exp1_3/meta/info.json (8-dim state/action + RGB/depth)."""
+"""ACT adapter for exp3_1 layout (multi-camera RGB/depth + 8-dim joint state/action)."""
 
 from __future__ import annotations
 
@@ -19,11 +19,13 @@ from policy_manager.observation_camera import resolve_observation_images
 
 
 @dataclass(frozen=True)
-class ACTExp13PolicyConfig:
+class ACTExp31PolicyConfig:
     checkpoint_dir: str
     device: str
-    image_key: str
-    depth_key: str
+    image_keys: tuple[str, ...]
+    depth_keys: tuple[str, ...]
+    camera_ids: tuple[str, ...]
+    depth_camera_ids: tuple[str, ...]
     use_depth: bool
     state_key: str
     img_h: int
@@ -32,7 +34,6 @@ class ACTExp13PolicyConfig:
     depth_clip_mm_max: float
     state_dim: int
     action_dim: int
-    arm_reference_frame: str
     arm_duration_sec: float
     hand_duration_sec: float
     control_hz: float
@@ -40,14 +41,12 @@ class ACTExp13PolicyConfig:
     hand_binary_threshold: float
     hand_binary_reset_hardware: tuple[float, float, float, float, float, float]
     hand_binary_grasp_hardware: tuple[float, float, float, float, float, float]
-    obs_camera_id: str = ""
-    obs_depth_camera_id: str = ""
 
 
-class ACTExp13PolicyAdapter(BasePolicy):
-    """Matches exp1_3 / info.json: observation.state(8), action(8), RGB + depth."""
+class ACTExp31PolicyAdapter(BasePolicy):
+    """Matches exp3_1 info.json: state/action=(7 arm joints + hand_grasp_binary), multi-camera RGB/depth."""
 
-    def __init__(self, node: Node, config: ACTExp13PolicyConfig) -> None:
+    def __init__(self, node: Node, config: ACTExp31PolicyConfig) -> None:
         self._node = node
         self._config = config
         self._torch_device = self._resolve_torch_device(config.device)
@@ -61,13 +60,38 @@ class ACTExp13PolicyAdapter(BasePolicy):
 
     @classmethod
     def from_node(cls, node: Node) -> "BasePolicy":
-        p = "act_exp1_3"
+        p = "act_exp3_1"
         checkpoint_dir = node.declare_parameter(f"{p}_checkpoint_dir", "").value
         device = node.declare_parameter(f"{p}_device", "auto").value
-        image_key = node.declare_parameter(
-            f"{p}_image_key", "observation.images.rs_color"
-        ).value
-        depth_key = node.declare_parameter(f"{p}_depth_key", "observation.rs_depth").value
+        image_keys = list(
+            node.declare_parameter(
+                f"{p}_image_keys",
+                [
+                    "observation.images.cam1_color",
+                    "observation.images.cam3_color",
+                    "observation.images.cam4_color",
+                ],
+            ).value
+            or []
+        )
+        depth_keys = list(
+            node.declare_parameter(
+                f"{p}_depth_keys",
+                [
+                    "observation.cam1_depth",
+                    "observation.cam3_depth",
+                    "observation.cam4_depth",
+                ],
+            ).value
+            or []
+        )
+        camera_ids = list(
+            node.declare_parameter(f"{p}_camera_ids", ["cam1", "cam3", "cam4"]).value or []
+        )
+        depth_camera_ids = list(
+            node.declare_parameter(f"{p}_depth_camera_ids", ["cam1", "cam3", "cam4"]).value
+            or []
+        )
         use_depth = bool(node.declare_parameter(f"{p}_use_depth", True).value)
         state_key = node.declare_parameter(f"{p}_state_key", "observation.state").value
         img_h = int(node.declare_parameter(f"{p}_img_h", 480).value)
@@ -77,7 +101,6 @@ class ACTExp13PolicyAdapter(BasePolicy):
         state_dim = int(node.declare_parameter(f"{p}_state_dim", 8).value)
         action_dim = int(node.declare_parameter(f"{p}_action_dim", 8).value)
         control_hz = float(node.declare_parameter(f"{p}_control_hz", 10.0).value)
-        arm_reference_frame = node.declare_parameter("arm_reference_frame", "fr3_link0").value
         arm_duration_sec = float(node.declare_parameter("arm_duration_sec", 0.1).value)
         hand_duration_sec = float(node.declare_parameter("hand_duration_sec", 0.1).value)
         fid = list(node.declare_parameter(f"{p}_hand_finger_id_order", [0, 1, 2, 3, 4, 5]).value)
@@ -96,16 +119,32 @@ class ACTExp13PolicyAdapter(BasePolicy):
         )
         if len(reset) != 6 or len(grasp) != 6:
             raise RuntimeError(f"{p}_hand_binary_(reset|grasp)_hardware must be length 6")
-        obs_camera_id = str(node.declare_parameter(f"{p}_camera_id", "").value or "").strip()
-        obs_depth_camera_id = str(
-            node.declare_parameter(f"{p}_depth_camera_id", "").value or ""
-        ).strip()
+        if len(image_keys) == 0:
+            raise RuntimeError(f"{p}_image_keys must be non-empty")
+        if len(camera_ids) != len(image_keys):
+            raise RuntimeError(
+                f"{p}_camera_ids length ({len(camera_ids)}) must match {p}_image_keys length ({len(image_keys)})"
+            )
+        if use_depth:
+            if len(depth_keys) != len(image_keys):
+                raise RuntimeError(
+                    f"{p}_depth_keys length ({len(depth_keys)}) must match {p}_image_keys length ({len(image_keys)})"
+                )
+            if len(depth_camera_ids) != len(image_keys):
+                raise RuntimeError(
+                    f"{p}_depth_camera_ids length ({len(depth_camera_ids)}) must match {p}_image_keys length ({len(image_keys)})"
+                )
+        else:
+            depth_keys = []
+            depth_camera_ids = []
 
-        config = ACTExp13PolicyConfig(
+        config = ACTExp31PolicyConfig(
             checkpoint_dir=str(checkpoint_dir),
             device=str(device),
-            image_key=str(image_key),
-            depth_key=str(depth_key),
+            image_keys=tuple(str(x) for x in image_keys),
+            depth_keys=tuple(str(x) for x in depth_keys),
+            camera_ids=tuple(str(x).strip() for x in camera_ids),
+            depth_camera_ids=tuple(str(x).strip() for x in depth_camera_ids),
             use_depth=bool(use_depth),
             state_key=str(state_key),
             img_h=img_h,
@@ -114,7 +153,6 @@ class ACTExp13PolicyAdapter(BasePolicy):
             depth_clip_mm_max=depth_clip_mm_max,
             state_dim=state_dim,
             action_dim=action_dim,
-            arm_reference_frame=str(arm_reference_frame),
             arm_duration_sec=arm_duration_sec,
             hand_duration_sec=hand_duration_sec,
             control_hz=control_hz,
@@ -122,14 +160,11 @@ class ACTExp13PolicyAdapter(BasePolicy):
             hand_binary_threshold=threshold,
             hand_binary_reset_hardware=tuple(float(x) for x in reset),
             hand_binary_grasp_hardware=tuple(float(x) for x in grasp),
-            obs_camera_id=obs_camera_id,
-            obs_depth_camera_id=obs_depth_camera_id,
         )
         adapter = cls(node=node, config=config)
         node.get_logger().info(
-            f"ACT exp1_3 policy loaded: checkpoint={checkpoint_dir} device={adapter._torch_device} "
-            f"rgb_key={image_key} depth_key={depth_key} use_depth={config.use_depth} state_key={state_key} "
-            f"camera_id={config.obs_camera_id!r} depth_camera_id={config.obs_depth_camera_id!r}"
+            f"ACT exp3_1 policy loaded: checkpoint={checkpoint_dir} device={adapter._torch_device} "
+            f"camera_ids={list(config.camera_ids)} use_depth={config.use_depth}"
         )
         return adapter
 
@@ -157,16 +192,15 @@ class ACTExp13PolicyAdapter(BasePolicy):
 
     @staticmethod
     def _normalized_from_hardware(k: float) -> float:
-        # inspire_executor: k = (x + 1) * 500  =>  x = k / 500 - 1
         return float(np.clip((k / 500.0) - 1.0, -1.0, 1.0))
 
     def _resolve_torch_device(self, requested: str) -> str:
         if requested == "auto":
             return "cuda" if torch.cuda.is_available() else "cpu"
         if requested not in ("cpu", "cuda"):
-            raise RuntimeError(f"Invalid act_exp1_3_device={requested}, expected auto|cpu|cuda")
+            raise RuntimeError(f"Invalid act_exp3_1_device={requested}, expected auto|cpu|cuda")
         if requested == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("act_exp1_3_device=cuda but CUDA is not available")
+            raise RuntimeError("act_exp3_1_device=cuda but CUDA is not available")
         return requested
 
     def _load_policy_bundle(self, checkpoint_dir: str) -> tuple[Any, Any, Any]:
@@ -175,10 +209,10 @@ class ACTExp13PolicyAdapter(BasePolicy):
         from lerobot.policies.factory import make_pre_post_processors
 
         if not checkpoint_dir:
-            raise RuntimeError("act_exp1_3_checkpoint_dir is empty while policy_type=act_exp1_3")
+            raise RuntimeError("act_exp3_1_checkpoint_dir is empty while policy_type=act_exp3_1")
         ckpt = Path(checkpoint_dir)
         if not ckpt.exists():
-            raise RuntimeError(f"ACT exp1_3 checkpoint dir does not exist: {ckpt}")
+            raise RuntimeError(f"ACT exp3_1 checkpoint dir does not exist: {ckpt}")
         policy_cfg = PreTrainedConfig.from_pretrained(str(ckpt))
         policy_cfg.device = self._torch_device
         policy = ACTPolicy.from_pretrained(str(ckpt), config=policy_cfg)
@@ -193,15 +227,7 @@ class ACTExp13PolicyAdapter(BasePolicy):
         )
         return policy, preprocessor, postprocessor
 
-    def _rgb_to_numpy(self, obs: RobotObservation) -> np.ndarray:
-        image, _, _ = resolve_observation_images(
-            obs,
-            self._config.obs_camera_id,
-            self._config.obs_depth_camera_id,
-            self._node,
-            "_warned_act_exp13_obs_camera",
-            self,
-        )
+    def _rgb_to_numpy(self, image: Image) -> np.ndarray:
         if image.height <= 0 or image.width <= 0:
             raise ValueError("rgb_image has invalid width/height")
         h, w = int(image.height), int(image.width)
@@ -313,43 +339,43 @@ class ACTExp13PolicyAdapter(BasePolicy):
         return 0.0 if d0 <= d1 else 1.0
 
     def _build_state(self, obs: RobotObservation) -> np.ndarray:
+        if len(obs.arm_joint_position) != 7:
+            raise ValueError(f"arm_joint_position size mismatch: got {len(obs.arm_joint_position)}, expected 7")
         state = np.zeros((8,), dtype=np.float32)
-        state[0] = float(obs.ee_pose.position.x)
-        state[1] = float(obs.ee_pose.position.y)
-        state[2] = float(obs.ee_pose.position.z)
-        state[3] = float(obs.ee_pose.orientation.x)
-        state[4] = float(obs.ee_pose.orientation.y)
-        state[5] = float(obs.ee_pose.orientation.z)
-        state[6] = float(obs.ee_pose.orientation.w)
+        state[0:7] = np.asarray(obs.arm_joint_position, dtype=np.float32)
         state[7] = self._build_obs_hand_binary(obs)
         if self._config.state_dim != 8:
-            raise ValueError(f"act_exp1_3_state_dim must be 8 for this layout, got {self._config.state_dim}")
+            raise ValueError(f"act_exp3_1_state_dim must be 8 for this layout, got {self._config.state_dim}")
         return state
 
     def _build_batch(self, obs: RobotObservation) -> Dict[str, torch.Tensor]:
-        rgb = self._rgb_to_numpy(obs)
-        state = self._build_state(obs)
         obs_t: Dict[str, torch.Tensor] = {
-            self._config.image_key: (
-                torch.from_numpy(rgb).permute(2, 0, 1).contiguous().float().unsqueeze(0) / 255.0
-            ).to(self._torch_device),
-            self._config.state_key: torch.from_numpy(state).unsqueeze(0).to(self._torch_device),
+            self._config.state_key: torch.from_numpy(self._build_state(obs)).unsqueeze(0).to(self._torch_device),
         }
-        if self._config.use_depth:
-            _, depth_img, _ = resolve_observation_images(
+        for i, image_key in enumerate(self._config.image_keys):
+            rgb_img, depth_img, _ = resolve_observation_images(
                 obs,
-                self._config.obs_camera_id,
-                self._config.obs_depth_camera_id,
+                self._config.camera_ids[i],
+                self._config.depth_camera_ids[i] if self._config.use_depth else "",
                 self._node,
-                "_warned_act_exp13_obs_camera",
+                f"_warned_act_exp31_obs_camera_{i}",
                 self,
             )
-            if depth_img.height <= 0 or depth_img.width <= 0:
-                raise ValueError("depth_image missing or empty; required for act_exp1_3_use_depth=true")
-            depth_hwc = self._depth_to_numpy_hwc3(depth_img)
-            obs_t[self._config.depth_key] = (
-                torch.from_numpy(depth_hwc).permute(2, 0, 1).contiguous().float().unsqueeze(0) / 255.0
+            rgb = self._rgb_to_numpy(rgb_img)
+            obs_t[image_key] = (
+                torch.from_numpy(rgb).permute(2, 0, 1).contiguous().float().unsqueeze(0) / 255.0
             ).to(self._torch_device)
+
+            if self._config.use_depth:
+                if depth_img.height <= 0 or depth_img.width <= 0:
+                    raise ValueError(
+                        f"depth image missing/empty for camera {self._config.depth_camera_ids[i]!r}"
+                    )
+                depth_hwc = self._depth_to_numpy_hwc3(depth_img)
+                obs_t[self._config.depth_keys[i]] = (
+                    torch.from_numpy(depth_hwc).permute(2, 0, 1).contiguous().float().unsqueeze(0)
+                    / 255.0
+                ).to(self._torch_device)
 
         return self._preprocessor(obs_t)
 
@@ -378,16 +404,10 @@ class ACTExp13PolicyAdapter(BasePolicy):
         msg = WholeBodyAction()
         msg.header.stamp = self._node.get_clock().now().to_msg()
 
-        msg.arm.control_mode = 2
+        msg.arm.control_mode = 0
         msg.arm.is_relative = False
-        msg.arm.reference_frame = self._config.arm_reference_frame
-        msg.arm.cartesian_pose.position.x = float(action[0])
-        msg.arm.cartesian_pose.position.y = float(action[1])
-        msg.arm.cartesian_pose.position.z = float(action[2])
-        msg.arm.cartesian_pose.orientation.x = float(action[3])
-        msg.arm.cartesian_pose.orientation.y = float(action[4])
-        msg.arm.cartesian_pose.orientation.z = float(action[5])
-        msg.arm.cartesian_pose.orientation.w = float(action[6])
+        msg.arm.joint_position = [float(x) for x in action[0:7]]
+        msg.arm.joint_velocity = []
         msg.arm.duration_sec = float(self._config.arm_duration_sec)
 
         b = float(action[7])
@@ -415,4 +435,3 @@ class ACTExp13PolicyAdapter(BasePolicy):
             action_out = self._postprocessor(action_out)
         action = self._decode_action(action_out)
         return self._to_whole_body_action(action)
-

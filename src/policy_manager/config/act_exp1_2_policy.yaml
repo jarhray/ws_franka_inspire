@@ -6,6 +6,7 @@ policy_manager:
 
     act_exp1_2_checkpoint_dir: "/home/jhr/lerobot_act_train/exp1/result_2_1/checkpoints/last/pretrained_model"
     act_exp1_2_device: auto
+    act_exp1_2_camera_id: cam1
     act_exp1_2_image_key: observation.images.rs_color
     act_exp1_2_state_key: observation.state
     act_exp1_2_img_h: 480

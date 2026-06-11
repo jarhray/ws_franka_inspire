@@ -2,9 +2,12 @@ policy_manager:
   ros__parameters:
     policy_type: act
     act_control_hz: 3.0
+    # true：推理阶段除 observation 类 ValueError 外，任何异常将退出进程（与 act_eg 严格运行一致）
+    act_strict_on_error: true
 
     act_checkpoint_dir: /home/jhr/act_0/checkpoints/last/pretrained_model
     act_device: auto
+    act_camera_id: cam1
     act_image_key: observation.camera_3.rgb
     act_state_key: observation.state
     act_img_h: 256

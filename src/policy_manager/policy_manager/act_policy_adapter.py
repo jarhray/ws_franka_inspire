@@ -11,6 +11,7 @@ from rclpy.node import Node
 from robot_interfaces.msg import RobotObservation, WholeBodyAction
 
 from policy_manager.base_policy import BasePolicy
+from policy_manager.observation_camera import resolve_observation_images
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,8 @@ class ACTPolicyConfig:
     arm_duration_sec: float
     hand_duration_sec: float
     control_hz: float
+    # Multi-camera: logical id e.g. cam1 (empty => legacy rgb_image)
+    obs_camera_id: str = ""
 
 
 class ACTPolicyAdapter(BasePolicy):
@@ -106,6 +109,11 @@ class ACTPolicyAdapter(BasePolicy):
             .get_parameter_value()
             .double_value
         )
+        obs_camera_id = (
+            node.declare_parameter("act_camera_id", "")
+            .get_parameter_value()
+            .string_value
+        )
 
         config = ACTPolicyConfig(
             checkpoint_dir=checkpoint_dir,
@@ -120,11 +128,13 @@ class ACTPolicyAdapter(BasePolicy):
             arm_duration_sec=float(arm_duration_sec),
             hand_duration_sec=float(hand_duration_sec),
             control_hz=float(control_hz),
+            obs_camera_id=str(obs_camera_id).strip(),
         )
         adapter = cls(node=node, config=config)
         node.get_logger().info(
             f"ACT policy loaded: checkpoint={checkpoint_dir} "
-            f"device={adapter.torch_device} image_key={image_key} state_key={state_key}"
+            f"device={adapter.torch_device} image_key={image_key} state_key={state_key} "
+            f"camera_id={config.obs_camera_id!r}"
         )
         return adapter
 
@@ -153,12 +163,21 @@ class ACTPolicyAdapter(BasePolicy):
             policy = ACTPolicy.from_pretrained(str(ckpt))
             policy.to(self._torch_device)
             policy.eval()
+            if hasattr(policy, 'reset'):
+                policy.reset()
             return policy
         except Exception as exc:
             raise RuntimeError(f'Failed to load ACT policy from {ckpt}') from exc
 
     def _rgb_to_numpy(self, obs: RobotObservation) -> np.ndarray:
-        image = obs.rgb_image
+        image, _, _ = resolve_observation_images(
+            obs,
+            self._config.obs_camera_id,
+            "",
+            self._node,
+            "_warned_act_obs_camera",
+            self,
+        )
         if image.height <= 0 or image.width <= 0:
             raise ValueError('rgb_image has invalid width/height')
         channels = 3
@@ -264,6 +283,7 @@ class ACTPolicyAdapter(BasePolicy):
         return msg
 
     def infer(self, obs: RobotObservation) -> Optional[WholeBodyAction]:
+        """Raises ValueError for recoverable observation mismatch (caller may skip publish)."""
         batch = self._build_batch(obs)
         with torch.inference_mode():
             action_out = self._policy.select_action(batch)

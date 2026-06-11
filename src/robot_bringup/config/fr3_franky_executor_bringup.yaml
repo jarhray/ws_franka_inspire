@@ -25,7 +25,7 @@ fr3_franky_executor:
     franky_controller_mode: joint_impedance
 
     # 对应 fr3_franky_relative_dynamics_factor (0~1: 越大通常越激进/越快，但更容易触发保护)
-    franky_relative_dynamics_factor: 0.2
+    franky_relative_dynamics_factor: 0.15
 
     default_velocity_duration_sec: 0.1
     velocity_async: true

@@ -15,10 +15,17 @@ float64[] hand_joint_velocity
 # Inspire tactile: normal/tangential forces per finger (same layout as GetTouchAct1.msg).
 service_interfaces/GetTouchAct1 hand_touch
 
-# Latest RealSense images for perception / policy.
+# Legacy single-camera fields: mirror the "primary" camera for backward compatibility.
+# When multi-camera is used, aggregator fills these from default_camera_id (or first slot).
 sensor_msgs/Image rgb_image
 sensor_msgs/Image depth_image
 sensor_msgs/CameraInfo camera_info
 
-string ee_pose_frame
+# Multi-camera (parallel arrays: camera_ids[i] <-> rgb_images[i], depth_images[i], camera_infos[i]).
+# Logical ids e.g. cam1, cam2 (configured in observation_aggregator).
+string[] camera_ids
+sensor_msgs/Image[] rgb_images
+sensor_msgs/Image[] depth_images
+sensor_msgs/CameraInfo[] camera_infos
 
+string ee_pose_frame

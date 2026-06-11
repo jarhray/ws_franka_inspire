@@ -105,6 +105,23 @@ class ExperimentLogger(Node):
 
     def _on_observation(self, msg: RobotObservation) -> None:
         event = self._base_event(msg.header.stamp)
+        cam_ids = list(msg.camera_ids)
+        rgb_stamps = []
+        depth_stamps = []
+        info_stamps = []
+        for i, cid in enumerate(cam_ids):
+            if i < len(msg.rgb_images):
+                rgb_stamps.append(_stamp_to_ns(msg.rgb_images[i].header.stamp))
+            else:
+                rgb_stamps.append(0)
+            if i < len(msg.depth_images):
+                depth_stamps.append(_stamp_to_ns(msg.depth_images[i].header.stamp))
+            else:
+                depth_stamps.append(0)
+            if i < len(msg.camera_infos):
+                info_stamps.append(_stamp_to_ns(msg.camera_infos[i].header.stamp))
+            else:
+                info_stamps.append(0)
         event.update(
             {
                 'ee_pose_frame': msg.ee_pose_frame,
@@ -115,6 +132,10 @@ class ExperimentLogger(Node):
                 'hand_touch_finger_ids': list(msg.hand_touch.finger_ids),
                 'hand_touch_normal_forces': list(msg.hand_touch.normal_forces),
                 'hand_touch_tangential_forces': list(msg.hand_touch.tangential_forces),
+                'camera_ids': cam_ids,
+                'per_camera_rgb_stamp_ns': rgb_stamps,
+                'per_camera_depth_stamp_ns': depth_stamps,
+                'per_camera_camera_info_stamp_ns': info_stamps,
                 'rgb_stamp_ns': _stamp_to_ns(msg.rgb_image.header.stamp),
                 'depth_stamp_ns': _stamp_to_ns(msg.depth_image.header.stamp),
                 'camera_info_stamp_ns': _stamp_to_ns(msg.camera_info.header.stamp),
