@@ -142,7 +142,7 @@
 默认行为：
 
 - 订阅 `/robot/hand_action`
-- 发布 `set_angle_data`（`service_interfaces/msg/SetAngle1`）
+- 发布 `/inspire/hand1/set_angle_data`（`service_interfaces/msg/SetAngle1`）
 - 将 `HandAction` 中的关节弧度 **r** 转为硬件整数 **k**（与 observation 侧 **k→r** 成对），支持 finger 顺序映射与保持最后命令重发
 
 ---
@@ -247,4 +247,3 @@ experiment_logger 订阅：
 - `realsense-ros-4.55.1`：RealSense ROS2 驱动及相关消息
 
 这些包主要作为底层设备能力提供者；项目业务建议通过“新增独立包 + topic/service 对接”方式扩展。
-

@@ -33,7 +33,7 @@ flowchart LR
   subgraph HW[硬件与上游]
     RS[RealSense topics]
     FR3[FR3 state topics]
-    INS[Inspire angle_data]
+    INS[Inspire /inspire/hand1/angle_data]
   end
 
   subgraph OBS[观测层]
@@ -136,7 +136,7 @@ flowchart LR
 
 ### 3.6 `inspire_executor`
 - 订阅 `HandAction`；
-- 转换到 `SetAngle1` 并发布到 `set_angle_data`；
+- 转换到 `SetAngle1` 并发布到 `/inspire/hand1/set_angle_data`；
 - 支持保持上一次命令定频重发。
 
 

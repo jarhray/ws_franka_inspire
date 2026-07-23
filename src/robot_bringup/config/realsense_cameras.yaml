@@ -9,6 +9,7 @@
 
 cameras:
   - camera_name: cam1
+    camera_namespace: camera
     serial_no: "_333422300857"
     color_profile: "640,480,15"
     depth_profile: "640,480,15"
@@ -18,6 +19,7 @@ cameras:
     enable_sync: true
 
   - camera_name: cam2
+    camera_namespace: camera
     serial_no: "_333422301952"
     color_profile: "640,480,15"
     depth_profile: "640,480,15"
@@ -27,6 +29,7 @@ cameras:
     enable_sync: true
 
   - camera_name: cam3
+    camera_namespace: camera
     serial_no: "_336222300912"
     color_profile: "640,480,15"
     depth_profile: "640,480,15"
@@ -36,10 +39,11 @@ cameras:
     enable_sync: true
 
   - camera_name: cam4
+    camera_namespace: camera
     serial_no: "_333422302680"
-    color_profile: "640,480,15"
+    color_profile: "424,240,15"
     depth_profile: "640,480,15"
     enable_color: true
-    enable_depth: true
+    enable_depth: false
     initial_reset: false
-    enable_sync: true
+    enable_sync: false

@@ -1,0 +1,31 @@
+# ACT egg grasping model: ee_pose + Inspire hand + tactile + cam1/cam3/cam4 RGB.
+policy_manager:
+  ros__parameters:
+    policy_type: act_dex_0
+    act_dex_0_control_hz: 30.0
+
+    act_dex_0_checkpoint_dir: /home/jhr/dex_tac/outputs/act_egg_grasping_tac_200k/checkpoints/200000/pretrained_model
+    act_dex_0_device: auto
+
+    act_dex_0_image_keys:
+      - observation.images.cam1
+      - observation.images.cam3
+      - observation.images.cam4
+    act_dex_0_camera_ids: [cam1, cam3, cam4]
+    # cam1/cam3 direct resize to 240x320; cam4 keeps aspect ratio and pads vertically.
+    act_dex_0_letterbox_camera_ids: [cam4]
+    act_dex_0_img_h: 240
+    act_dex_0_img_w: 320
+
+    act_dex_0_state_key: observation.state
+    act_dex_0_state_dim: 13
+    act_dex_0_tactile_key: observation.tactile
+    act_dex_0_tactile_rows: 2
+    act_dex_0_tactile_cols: 5
+    act_dex_0_action_dim: 13
+
+    # Must match the order used by observation_aggregator and the training dataset.
+    act_dex_0_hand_finger_id_order: [0, 1, 2, 3, 4, 5]
+    arm_reference_frame: fr3_link0
+    arm_duration_sec: 0.033333333
+    hand_duration_sec: 0.033333333

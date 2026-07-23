@@ -8,12 +8,19 @@ from service_interfaces.msg import GetTouchAct1
 class HandControlSubscriber(Node):
     def __init__(self):
         super().__init__("handcontrol_subscriber")
+
+        spacename = str(self.declare_parameter("spacename", "inspire").value).strip("/")
+        hand_name = str(self.declare_parameter("name", "hand1").value).strip("/")
+        topic_prefix = "/".join(part for part in (spacename, hand_name) if part)
+        touch_topic = f"{topic_prefix}/touch_data" if topic_prefix else "touch_data"
+
         self.subscription = self.create_subscription(
             GetTouchAct1,
-            "touch_data",
+            touch_topic,
             self.listener_callback,
             10
         )
+        self.get_logger().info(f"订阅话题: {touch_topic}")
 
     def listener_callback(self, msg):
         lines = ["触觉数据 (法向力 / 切向力):"]
@@ -40,4 +47,3 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
-

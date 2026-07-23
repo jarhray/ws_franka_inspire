@@ -23,7 +23,7 @@
 
 - 输入（默认）：
   - FR3 关节/位姿/twist 相关 topic（按候选路径订阅）
-  - `/angle_data`（Inspire 角度）
+  - `/inspire/hand1/angle_data`（Inspire 角度）
   - `/camera/color/image_raw`
   - `/camera/depth/image_rect_raw`
   - `/camera/color/camera_info`
@@ -102,7 +102,7 @@
 - 输入（默认）：
   - `/robot/hand_action` (`HandAction`)
 - 输出（默认）：
-  - `set_angle_data` (`service_interfaces/msg/SetAngle1`)
+  - `/inspire/hand1/set_angle_data` (`service_interfaces/msg/SetAngle1`)
 - 关键参数：
   - `set_angle_topic`
   - `command_rate_hz`
@@ -165,4 +165,3 @@
 - 再看路由输出：`/robot/arm_action` + `/robot/hand_action`
 - 再看执行反馈：`/robot/arm_execution/status` + `/robot/arm_execution/error`
 - 最后确认日志：`~/.ros/experiment_logs/<session>/*.jsonl`
-

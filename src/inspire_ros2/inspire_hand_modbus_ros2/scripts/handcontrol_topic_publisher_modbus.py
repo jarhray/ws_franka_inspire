@@ -52,19 +52,19 @@ MODBUS_IP, MODBUS_PORT = load_modbus_config()
 
 # 触觉传感器：与 touch_data_ts 一致，每指一个基地址，读 25 个寄存器，法向力 16-17，切向力 20-21
 TOUCH_SENSOR_BASE_ADDR = {
-    1: 3000,   # 小拇指 Pinky
-    2: 3058,   # 无名指 Ring Finger
-    3: 3116,   # 中指 Middle Finger
-    4: 3174,   # 食指 Index Finger
-    5: 3232,   # 大拇指 Thumb
+    0: 3000,   # 小拇指 Pinky
+    1: 3058,   # 无名指 Ring Finger
+    2: 3116,   # 中指 Middle Finger
+    3: 3174,   # 食指 Index Finger
+    4: 3232,   # 大拇指 Thumb
 }
 
 FINGER_NAMES = {
-    1: "Pinky",
-    2: "Ring Finger",
-    3: "Middle Finger",
-    4: "Index Finger",
-    5: "Thumb",
+    0: "Pinky",
+    1: "Ring Finger",
+    2: "Middle Finger",
+    3: "Index Finger",
+    4: "Thumb",
 }
 
 
@@ -99,14 +99,23 @@ def read_finger_touch_data(client, base_addr):
 class HandControlPublisher(Node):
     def __init__(self):
         super().__init__("handcontrol_publisher")
-        self.publisher_ = self.create_publisher(GetTouchAct1, "touch_data", 10)
-        self.timer = self.create_timer(0.02, self.publish_touch_data)  # 50Hz
+
+        publish_rate = float(self.declare_parameter("publish_rate", 50.0).value)
+        spacename = str(self.declare_parameter("spacename", "inspire").value).strip("/")
+        hand_name = str(self.declare_parameter("name", "hand1").value).strip("/")
+        topic_prefix = "/".join(part for part in (spacename, hand_name) if part)
+        touch_topic = f"{topic_prefix}/touch_data" if topic_prefix else "touch_data"
+
+        self.publisher_ = self.create_publisher(GetTouchAct1, touch_topic, 10)
+        self.timer = self.create_timer(1.0 / max(0.1, publish_rate), self.publish_touch_data)
         self.modbus_client = ModbusTcpClient(MODBUS_IP, port=MODBUS_PORT)
 
         if not self.modbus_client.connect():
             self.get_logger().error("无法连接到 Modbus 服务器")
             raise RuntimeError("Modbus 连接失败")
-        self.get_logger().info("Modbus 连接成功")
+        self.get_logger().info(
+            f"Modbus 连接成功，发布话题: {touch_topic}，频率: {publish_rate:.2f} Hz"
+        )
 
     def publish_touch_data(self):
         start_time = time.time()
@@ -151,4 +160,3 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
-

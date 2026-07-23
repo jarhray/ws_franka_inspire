@@ -111,8 +111,8 @@
 3. ros2 run inspire_hand_modbus_ros2 inspire_hand_modbus_topic.py
 此示例将发布设置角度、速度、力，读取角度、触觉、力、电缸温度的topic。
 topic调用示例：
-设置角度： ros2 topic pub -1 /set_angle_data service_interfaces/msg/SetAngle1 "{finger_ids: [1,2,3,4,5,6], angles: [1000,1000,1000,1000,1000,1000]}"
-读取角度： ros2 topic echo /angle_data 
+设置角度： ros2 topic pub -1 /inspire/hand1/set_angle_data service_interfaces/msg/SetAngle1 "{finger_ids: [0,1,2,3,4,5], angles: [1000,1000,1000,1000,1000,1000]}"
+读取角度： ros2 topic echo /inspire/hand1/angle_data
 
     6)ros service使用示例：脚本调用service_interfaces/srv中所包含的服务：Setpos
      需要重新打开一个新的终端，并执行终端指令：    source install/setup.bash

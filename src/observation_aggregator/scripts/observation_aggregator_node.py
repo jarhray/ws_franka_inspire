@@ -98,8 +98,12 @@ class ObservationAggregator(Node):
         # ---- Parameters (multi-camera) ----
         # ``enabled_cameras``: comma-separated ids matching hardware_bringup.launch.py
         # (e.g. cam1,cam3). When non-empty, overrides observation_camera_ids and auto-subscribes to
-        # /{id}/{id}/color/image_raw, /{id}/{id}/depth/image_rect_raw, /{id}/{id}/color/camera_info
-        # (same camera_name + camera_namespace layout as rs_launch for each RealSense).
+        # /camera/{id}/color/image_raw, /camera/{id}/depth/image_rect_raw,
+        # /camera/{id}/color/camera_info by default.
+        # ``realsense_camera_namespace`` must match camera_namespace passed to rs_launch.
+        self.realsense_camera_namespace = str(
+            self.declare_parameter("realsense_camera_namespace", "camera").value or ""
+        ).strip().strip("/")
         self.enabled_cameras = str(
             self.declare_parameter("enabled_cameras", "").value or ""
         ).strip()
@@ -137,18 +141,25 @@ class ObservationAggregator(Node):
             n_dep = len(self.observation_camera_depth_topics)
             auto_topics = n_rgb == 0 and n_dep == 0
             if auto_topics:
+                topic_namespace = (
+                    f"/{self.realsense_camera_namespace}"
+                    if self.realsense_camera_namespace
+                    else ""
+                )
                 for cid in self.observation_camera_ids:
                     c = str(cid).strip()
-                    self.observation_camera_rgb_topics.append(f"/{c}/{c}/color/image_raw")
+                    self.observation_camera_rgb_topics.append(
+                        f"{topic_namespace}/{c}/color/image_raw"
+                    )
                     self.observation_camera_depth_topics.append(
-                        f"/{c}/{c}/depth/image_rect_raw"
+                        f"{topic_namespace}/{c}/depth/image_rect_raw"
                     )
                 n_info = len(self.observation_camera_info_topics)
                 if n_info == 0:
                     for cid in self.observation_camera_ids:
                         c = str(cid).strip()
                         self.observation_camera_info_topics.append(
-                            f"/{c}/{c}/color/camera_info"
+                            f"{topic_namespace}/{c}/color/camera_info"
                         )
                 elif n_info != n_ids:
                     raise ValueError(
@@ -174,11 +185,11 @@ class ObservationAggregator(Node):
         if self._multi_camera_mode and self.enabled_cameras:
             self.get_logger().info(
                 f"enabled_cameras={self.enabled_cameras!r} -> topics aligned with "
-                f"hardware_bringup /{{id}}/{{id}}/..."
+                f"hardware_bringup /{self.realsense_camera_namespace or '<root>'}/{{id}}/..."
             )
         elif self._multi_camera_mode and auto_topics:
             self.get_logger().info(
-                "Multi-camera: auto RealSense topics /{id}/{id}/color|depth|camera_info "
+                "Multi-camera: auto RealSense topics /camera/{id}/color|depth|camera_info "
                 f"for ids={self.observation_camera_ids!r}"
             )
 
@@ -192,13 +203,13 @@ class ObservationAggregator(Node):
 
         # ---- Parameters (Inspire) ----
         self.hand_angle_topic = self.declare_parameter(
-            "hand_angle_topic", "/angle_data"
+            "hand_angle_topic", "/inspire/hand1/angle_data"
         ).value
         self.hand_finger_id_order = self.declare_parameter(
             "hand_finger_id_order", [0, 1, 2, 3, 4, 5]
         ).value
         self.hand_touch_topic = self.declare_parameter(
-            "hand_touch_topic", "/touch_data"
+            "hand_touch_topic", "/inspire/hand1/touch_data"
         ).value
 
         # ---- Parameters (FR3) ----
@@ -585,6 +596,9 @@ class ObservationAggregator(Node):
             hp, hv = self._hand_k_ordered_to_radians()
             obs.hand_joint_position = hp
             obs.hand_joint_velocity = hv
+            obs.hand_joint_hardware_position = [
+                float(value) for value in self._hand_k_ordered
+            ]
 
         self._fill_hand_touch(obs)
 
@@ -642,4 +656,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

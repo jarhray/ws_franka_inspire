@@ -36,7 +36,8 @@ public:
     arm_twist_topic_ = declare_parameter<std::string>(
       "arm_twist_topic", "~/desired_end_effector_twist");
 
-    hand_angle_topic_ = declare_parameter<std::string>("hand_angle_topic", "/angle_data");
+    hand_angle_topic_ =
+      declare_parameter<std::string>("hand_angle_topic", "/inspire/hand1/angle_data");
 
     rs_rgb_image_topic_ =
       declare_parameter<std::string>("rs_rgb_image_topic", "/camera/color/image_raw");
@@ -376,4 +377,3 @@ int main(int argc, char** argv)
   rclcpp::shutdown();
   return 0;
 }
-

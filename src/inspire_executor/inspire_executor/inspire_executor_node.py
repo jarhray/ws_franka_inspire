@@ -31,7 +31,7 @@ class InspireExecutor(Node):
             'hand_action_topic', '/robot/hand_action'
         ).get_parameter_value().string_value
         self._set_angle_topic = self.declare_parameter(
-            'set_angle_topic', 'set_angle_data'
+            'set_angle_topic', '/inspire/hand1/set_angle_data'
         ).get_parameter_value().string_value
 
         self._rate_hz = self.declare_parameter('command_rate_hz', 30.0).get_parameter_value().double_value

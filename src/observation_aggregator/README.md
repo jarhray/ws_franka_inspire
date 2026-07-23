@@ -9,7 +9,7 @@
 | FR3 | `sensor_msgs/JointState`（测量关节状态） | `arm_joint_position`、`arm_joint_velocity` |
 | FR3 | `geometry_msgs/PoseStamped`（末端位姿） | `ee_pose`、`ee_pose_frame` |
 | FR3 | `geometry_msgs/TwistStamped`（末端 twist，来自 Franka 状态广播中的期望项） | `ee_twist` |
-| Inspire | `service_interfaces/msg/GetAngleAct1`（`angle_data` 等） | 节点内部仍按原样接收 **硬件整数 k**；仅在**发布** `/robot/observation` 时把 k 换成弧度 **r=f(k)** 写入 `hand_joint_position`，`hand_joint_velocity` 为 **rad/s**（对 r 的差分）。与 `inspire_executor` 成对。 |
+| Inspire | `service_interfaces/msg/GetAngleAct1`（`/inspire/hand1/angle_data` 等） | 节点内部按原样接收 **硬件整数 k**；发布 `/robot/observation` 时，原始 k 写入 `hand_joint_hardware_position`，同时换算为弧度 **r=f(k)** 写入 `hand_joint_position`，`hand_joint_velocity` 为 **rad/s**（对 r 的差分）。与 `inspire_executor` 成对。 |
 | RealSense | `sensor_msgs/Image` / `CameraInfo` | `rgb_image`、`depth_image`、`camera_info`；多路时另写入 `camera_ids` / `rgb_images` / `depth_images` / `camera_infos`（并行数组） |
 
 ## 依赖
@@ -65,7 +65,8 @@ ros2 run observation_aggregator observation_aggregator_node
 
 ### Inspire
 
-- 默认：`/angle_data`（`GetAngleAct1`）
+- 默认角度：`/inspire/hand1/angle_data`（`GetAngleAct1`）
+- 默认触觉：`/inspire/hand1/touch_data`（`GetTouchAct1`）
 - **接口未改**：订阅回调仍只处理 `angle_data` 的原始 **k**（与此前一致）。
 - **发布时换算**：在组装 `RobotObservation` 时增加一步 **k→弧度 r=f(k)**（与 `inspire_executor` 中前向 f 一致）：
   - 四指（id 0–3）：\(r = -5\times10^{-10}k^3 + 9\times10^{-7}k^2 - 0.0018k + 1.4191\)
@@ -78,7 +79,7 @@ ros2 run observation_aggregator observation_aggregator_node
 - `/camera/depth/image_rect_raw`
 - `/camera/color/camera_info`
 
-若 launch 把相机放在嵌套命名空间下（例如同时存在 `/camera/camera/color/image_raw`），本节点默认**额外订阅**一组 alternates（见参数 `rs_*_topic_alternates`），也可手动改 `rs_rgb_image_topic` 等。
+单相机遗留模式默认使用 `/camera/color/...`；多相机模式默认使用 `/camera/{id}/color|depth|camera_info`。若使用其它 `camera_namespace`，请同步设置 `realsense_camera_namespace` 或手动填写各路 topic。
 
 ## 参数
 
@@ -91,13 +92,15 @@ ros2 run observation_aggregator observation_aggregator_node
 | `ros2_control_node_name` | string | `ros2_control_node` | `ros2_control_node` 节点名，用于备选订阅路径 |
 | `arm_joint_state_extra_topics` | string[] | `[/franka/joint_states,/joint_states]` | 假硬件或未加载 `franka_robot_state_broadcaster` 时的关节回退话题 |
 | `arm_joint_name_order` | string[] | `[]` | 非空时按**关节名**重排 `JointState` 到固定顺序；空则沿用消息内顺序 |
-| `hand_angle_topic` | string | `/angle_data` | Inspire 角度话题 |
+| `hand_angle_topic` | string | `/inspire/hand1/angle_data` | Inspire 角度话题 |
+| `hand_touch_topic` | string | `/inspire/hand1/touch_data` | Inspire 触觉话题 |
 | `hand_finger_id_order` | int[] | `[0,1,2,3,4,5]` | 将 `GetAngleAct1.finger_ids` 映射到 `hand_joint_position` 的固定顺序 |
 | `rs_rgb_image_topic` | string | `/camera/color/image_raw` | RGB 图像 |
 | `rs_depth_image_topic` | string | `/camera/depth/image_rect_raw` | 深度图像 |
 | `rs_camera_info_topic` | string | `/camera/color/camera_info` | 相机标定（常与 RGB 对齐） |
 | `rs_rgb_image_topic_alternates` 等 | string[] | 见代码默认 | 与主 `rs_*` 并行订阅的备选 topic（嵌套相机名时常用） |
-| `enabled_cameras` | string | `""` | **推荐**：逗号分隔逻辑名（与 `robot_bringup/hardware_bringup.launch.py` 的 `enabled_cameras` 一致）。非空时覆盖 `observation_camera_ids`，并按 `/id/id/color|depth|camera_info` 自动订阅 |
+| `enabled_cameras` | string | `""` | **推荐**：逗号分隔逻辑名（与 `robot_bringup/hardware_bringup.launch.py` 的 `enabled_cameras` 一致）。非空时覆盖 `observation_camera_ids`，并按 `/camera/{id}/color|depth|camera_info` 自动订阅 |
+| `realsense_camera_namespace` | string | `camera` | 多相机自动 topic 的 RealSense `camera_namespace` |
 | `observation_camera_ids` | string[] | `[]` | **非空则启用多相机模式**（此时不再订阅 `rs_*`）。若 RGB/Depth topic 列表均为空，则按与 `enabled_cameras` 相同的 RealSense 布局自动生成 topic |
 | `observation_camera_rgb_topics` | string[] | `[]` | 与 `observation_camera_ids` 等长；或留空以启用上条自动布局 |
 | `observation_camera_depth_topics` | string[] | `[]` | 同上 |
@@ -115,9 +118,9 @@ default_camera_id: cam1
 
 ```yaml
 observation_camera_ids: [cam1, cam3]
-observation_camera_rgb_topics: [/cam1/cam1/color/image_raw, /cam3/cam3/color/image_raw]
-observation_camera_depth_topics: [/cam1/cam1/depth/image_rect_raw, /cam3/cam3/depth/image_rect_raw]
-observation_camera_info_topics: [/cam1/cam1/color/camera_info, /cam3/cam3/color/camera_info]
+observation_camera_rgb_topics: [/camera/cam1/color/image_raw, /camera/cam3/color/image_raw]
+observation_camera_depth_topics: [/camera/cam1/depth/image_rect_raw, /camera/cam3/depth/image_rect_raw]
+observation_camera_info_topics: [/camera/cam1/color/camera_info, /camera/cam3/color/camera_info]
 default_camera_id: cam1
 ```
 

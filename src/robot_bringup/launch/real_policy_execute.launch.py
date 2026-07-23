@@ -39,7 +39,7 @@ def _build_nodes(context, bringup_share: str, policy_manager_share: str):
     enabled_cameras = LaunchConfiguration('enabled_cameras').perform(context).strip()
     obs_parameters = [params_file_path]
     if enabled_cameras:
-        obs_parameters.append({'ros__parameters': {'enabled_cameras': enabled_cameras}})
+        obs_parameters.append({'enabled_cameras': enabled_cameras})
 
     return [
         Node(

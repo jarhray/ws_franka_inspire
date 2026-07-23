@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import sys
 from typing import Optional, Tuple
 
 import rclpy
@@ -37,12 +36,6 @@ class PolicyManager(Node):
         self._warned_no_observation = False
         self._policy: Optional[BasePolicy] = None
         self._warned_bad_observation = False
-        self._act_strict_on_error = (
-            self.declare_parameter('act_strict_on_error', True)
-            .get_parameter_value()
-            .bool_value
-        )
-
         self.create_subscription(
             RobotObservation, self._observation_topic, self._on_observation, 10
         )
@@ -77,14 +70,6 @@ class PolicyManager(Node):
                 self._warned_bad_observation = True
             return None
         except Exception as exc:
-            # ACT 严格模式：加载已成功后，除 ValueError 外的推理错误视为致命（GPU/模型等）。
-            if self._policy_type == 'act' and self._act_strict_on_error:
-                self.get_logger().fatal(f'ACT inference failed (strict exit): {exc}')
-                try:
-                    self.destroy_node()
-                finally:
-                    rclpy.shutdown()
-                sys.exit(1)
             if not self._warned_bad_observation:
                 self.get_logger().warn(f'Skip policy inference due to error: {exc}')
                 self._warned_bad_observation = True

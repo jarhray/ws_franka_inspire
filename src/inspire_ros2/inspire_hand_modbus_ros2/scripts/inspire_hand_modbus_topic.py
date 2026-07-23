@@ -125,15 +125,39 @@ class ModbusNode(Node):
     def __init__(self):
         super().__init__('sensor_data_publisher')
 
-        # 创建发布者
-        self.force_publisher = self.create_publisher(GetForceAct1, 'force_data', 10)
-        self.angle_publisher = self.create_publisher(GetAngleAct1, 'angle_data', 10)
-        self.touch_publisher = self.create_publisher(GetTouchAct1, 'touch_data', 10)
-        self.temp_publisher = self.create_publisher(GetTemp1, 'temp_data', 10)  
+        self.declare_parameter('publish_rate', 10.0)
+        self.declare_parameter('spacename', 'inspire')
+        self.declare_parameter('name', 'hand1')
 
-        self.create_subscription(SetAngle1, 'set_angle_data', self.angle_callback, 10)
-        self.create_subscription(SetForce1, 'set_force_data', self.force_callback, 10)
-        self.create_subscription(SetSpeed1, 'set_speed_data', self.speed_callback, 10)
+        publish_rate = float(self.get_parameter('publish_rate').value)
+        self.publish_period = 0.1 if publish_rate <= 0.0 else 1.0 / publish_rate
+
+        spacename = str(self.get_parameter('spacename').value).strip().strip('/')
+        hand_name = str(self.get_parameter('name').value).strip().strip('/')
+        topic_prefix_parts = [part for part in (spacename, hand_name) if part]
+        self.topic_prefix = '/'.join(topic_prefix_parts)
+
+        if self.topic_prefix:
+            self.get_logger().info(
+                f"topic 前缀: {self.topic_prefix}, 发布频率: {1.0 / self.publish_period:.2f} Hz"
+            )
+        else:
+            self.get_logger().info(
+                f"未配置 topic 前缀，仅使用基础 topic 名称，发布频率: {1.0 / self.publish_period:.2f} Hz"
+            )
+
+        def topic_name(base_name):
+            return f"{self.topic_prefix}/{base_name}" if self.topic_prefix else base_name
+
+        # 创建发布者
+        self.force_publisher = self.create_publisher(GetForceAct1, topic_name('force_data'), 10)
+        self.angle_publisher = self.create_publisher(GetAngleAct1, topic_name('angle_data'), 10)
+        self.touch_publisher = self.create_publisher(GetTouchAct1, topic_name('touch_data'), 10)
+        self.temp_publisher = self.create_publisher(GetTemp1, topic_name('temp_data'), 10)
+
+        self.create_subscription(SetAngle1, topic_name('set_angle_data'), self.angle_callback, 10)
+        self.create_subscription(SetForce1, topic_name('set_force_data'), self.force_callback, 10)
+        self.create_subscription(SetSpeed1, topic_name('set_speed_data'), self.speed_callback, 10)
 
         # 创建 Modbus TCP 客户端
         self.modbus_client = ModbusTcpClient(MODBUS_IP, port=MODBUS_PORT)
@@ -251,7 +275,7 @@ class ModbusNode(Node):
                 force_data_msg.finger_names.append(FINGER_NAMES.get(finger_id, "Unknown Finger"))
 
             self.force_publisher.publish(force_data_msg)
-            # self.get_logger().info(f"已发布力数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
+            self.get_logger().info(f"已发布力数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
 
         if self.angle_publisher.get_subscription_count() > 0:
             angle_data_msg = GetAngleAct1()
@@ -266,7 +290,7 @@ class ModbusNode(Node):
                 angle_data_msg.finger_names.append(FINGER_NAMES.get(finger_id, "Unknown Finger"))
 
             self.angle_publisher.publish(angle_data_msg)
-            # self.get_logger().info(f"已发布角度数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
+            self.get_logger().info(f"已发布角度数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
 
         if self.touch_publisher.get_subscription_count() > 0:
             touch_data = self.read_touch_data()
@@ -277,7 +301,7 @@ class ModbusNode(Node):
             touch_data_msg.tangential_forces = touch_data['tangential_forces']
 
             self.touch_publisher.publish(touch_data_msg)
-            # self.get_logger().info(f"已发布触觉数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
+            self.get_logger().info(f"已发布触觉数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
 
         if self.temp_publisher.get_subscription_count() > 0:
             temp_data_msg = GetTemp1()
@@ -292,7 +316,7 @@ class ModbusNode(Node):
                 temp_data_msg.finger_names.append(FINGER_NAMES.get(finger_id, "Unknown Finger"))
 
             self.temp_publisher.publish(temp_data_msg)
-            # self.get_logger().info(f"已发布温度数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
+            self.get_logger().info(f"已发布温度数据，读取频率: {1 / (time.time() - start_time):.2f} Hz")
 
     def angle_callback(self, msg):
         for finger_id, angle in zip(msg.finger_ids, msg.angles):
@@ -332,7 +356,7 @@ class ModbusNode(Node):
     def data_reading_thread(self):
         while rclpy.ok():
             self.publish_data()
-            time.sleep(0.1)
+            time.sleep(self.publish_period)
 
 def main(args=None):
     rclpy.init(args=args)

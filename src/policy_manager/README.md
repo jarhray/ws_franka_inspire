@@ -1,150 +1,120 @@
 # policy_manager
 
-`policy_manager` 负责根据 `policy_type` 选择策略来源，并统一发布 `WholeBodyAction` 给后续 `action_router`。
+`policy_manager` 根据 `policy_type` 创建策略，将 `RobotObservation` 转换为统一的
+`WholeBodyAction`，并发布给后续的 `action_router`。
 
-当前已支持参数切换：`dummy | act | act_exp1 | act_exp1_1 | act_exp1_2 | act_exp1_3 | act_exp3_0 | act_exp3_0_det | act_exp3_5_det | act_exp3_1 | act_exp3_2 | pi05_exp1_3_lora`（`bc | vla` 回退为 dummy 参数行为）。
-其中各模型参数建议放在独立 YAML：
+## 支持的策略
+
+目前支持以下策略：
+
+- `dummy`：发布配置中指定的固定动作，用于链路调试。
+- `act_dex_0`：鸡蛋抓取 ACT，输入三路 RGB、13 维本体状态和 `2×5` 触觉。
+- `act_exp3_0`：加载 LeRobot ACT checkpoint，使用三路 RGB/深度和 8 维状态进行实时推理。
+
+对应配置文件：
 
 - `config/dummy_policy.yaml`
-- `config/act_policy.yaml`（与 `act_eg.py` 对齐的默认 ACT：13 维 `observation.state` + `observation.camera_3.rgb`）
-- `config/act_exp1_policy.yaml`（与 `exp1_lerobot/meta/info.json` 对齐：30 维 state + RGB/深度，动作为 13 维关节目标）
-- `config/act_exp1_1_policy.yaml`（与 `data_recorded/exp1_1/meta/info.json` 对齐：13 维 state/action，仅 ee_pose+手，RGB/深度）
-- `config/act_exp1_2_policy.yaml`（与 `data_recorded/exp1_2/meta/info.json` 对齐：8 维 state/action，ee_pose+二值抓取，RGB）
-- `config/act_exp3_0_policy.yaml`（与 `datasets/exp3_0/meta/info.json` 对齐：8 维 state/action=ee_pose(7)+二值抓取，三路 RGB+深度：cam1/cam3/cam4）
-- `config/act_exp3_0_det_policy.yaml`（在 `act_exp3_0` 基础上增加 RT-DETRv4 + 深度 + 手眼标定目标位置估计；支持将检测得到的 base x,y 注入 `observation.environment_state`）
-- `config/act_exp3_5_det_policy.yaml`（与 `exp3_5` 训练 `config.json` 对齐：8 维 joint state/action + `observation.environment_state`；检测与 `act_exp3_0_det` 相同，机械臂下发 `joint_position`）
-- `config/act_exp3_1_policy.yaml`（与 `datasets/exp3_1/meta/info.json` 对齐：8 维 state/action=7关节+二值抓取，三路 RGB+深度：cam1/cam3/cam4）
-- `config/act_exp3_2_policy.yaml`（与 `exp3_2` 训练配置对齐：8 维 state + 三路 RGB/深度，动作按**相对 ee_pose(7)+二值抓取**下发）
+- `config/act_dex_0_policy.yaml`
+- `config/act_exp3_0_policy.yaml`
 
-## ACT（policy_type=act）语义与 `act_eg.py` 对齐
+其他历史实验策略及其配置文件已移除；传入未注册的 `policy_type` 时，节点会列出当前可用类型并启动失败。
 
-- **观测 `observation.state`（13）**：由 `RobotObservation` 拼接  
-  - `[0:7]` = `ee_pose`（`position xyz` + `orientation xyzw`）  
-  - `[7:13]` = `hand_joint_position`（6 维，须与训练一致）
-- **图像**：默认键 `observation.camera_3.rgb`；从 `RobotObservation` 的 RGB 选取（`act_camera_id` 对应多相机槽位，空则用 legacy `rgb_image`），缩放到 `act_img_h/w`。
-- **动作（13）**：  
-  - `[0:7]` → `ArmAction.cartesian_pose`（`control_mode=2`，绝对位姿）  
-  - `[7:13]` → `HandAction.joint_position`（**保持训练时的归一化 [-1,1]**，不在此节点反归一化）
-- **加载失败**：`ACTPolicy.from_pretrained` 失败会直接抛错，**节点无法启动**（无 dummy 回退）。
-- **运行时错误**：默认 `act_strict_on_error:=true` —— 观测类问题抛出 `ValueError` 时仅跳过本周期；其它推理异常会 **记录 fatal 并退出进程**。可设为 `false` 改为仅告警跳过。
+## act_dex_0 数据约定
 
-## 功能概览
+- checkpoint：`dex_tac/outputs/act_egg_grasping_tac_200k/checkpoints/200000/pretrained_model`。
+- `observation.state`：13 维，内容为 `ee_pose(7) + hand_hardware_angle(6)`；手部状态直接读取 `RobotObservation.hand_joint_hardware_position` 中的原始硬件角度 `k`，不经过弧度换算。
+- `observation.tactile`：`2×5`，第一行为 5 指法向力，第二行为 5 指切向力，按 `finger_id=0..4` 排列。
+- `action`：13 维，内容为绝对 `ee_pose(7) + hand_target_hardware(6)`；手部硬件目标会转换为执行链使用的 `[-1,1]`。
+- `cam1` / `cam3`：在线图像直接缩放到 `240×320`。
+- `cam4`：保持宽高比缩放到宽 320（原始 `240×424` 时高度约 181），然后用黑边上下居中补到 `240×320`。
 
-- 策略类型切换：
-  - `policy_type=dummy`：发布参数指定的固定动作
-  - `policy_type=act`：lerobot `ACTPolicy` 实时推理
-  - `policy_type=bc` / `vla`：未接模型，使用与 dummy 相同的参数化固定动作
-- 可选“先等观测再发动作”：
-  - `require_observation_before_publish=true` 时，在收到 `RobotObservation` 前不发布动作
-- 统一输出：
-  - `WholeBodyAction`（默认话题 `/robot/whole_body_action`）
+运行该策略：
 
-## 订阅与发布
+```bash
+ros2 run policy_manager policy_manager_node --ros-args \
+  --params-file src/policy_manager/config/act_dex_0_policy.yaml
+```
 
-- 订阅
-  - `observation_topic`（默认 `/robot/observation`），类型：`robot_interfaces/msg/RobotObservation`
-- 发布
-  - `whole_body_action_topic`（默认 `/robot/whole_body_action`），类型：`robot_interfaces/msg/WholeBodyAction`
+完整 pipeline 中，将 `robot_bringup/config/real_policy_execute.yaml` 的
+`policy_type` 改为 `act_dex_0`，`policy_params_file:=auto` 会自动加载对应配置。
 
-## 参数组织方式
+## 输入与输出
 
-- 通用参数（放在 pipeline YAML，如 `robot_bringup/config/real_policy_execute.yaml`）
-  - `observation_topic`
-  - `whole_body_action_topic`
-  - `require_observation_before_publish`
-- 模型参数（放在模型 YAML）
-  - dummy: `publish_rate_hz`、`arm_*`、`hand_*`、`is_relative`
-  - act: `act_*`、`act_strict_on_error`、`act_camera_id`（多相机时填 `cam1` 等；空则使用 `RobotObservation` 的 legacy `rgb_image`）、`arm_reference_frame`、`arm_duration_sec`、`hand_duration_sec`
-  - act_exp1: 同上另有一套 `act_exp1_*`，并包含 RGB（`observation.images.rs_color`）与深度（`observation.rs_depth`）；多相机时用 `act_exp1_camera_id`、`act_exp1_depth_camera_id` 选择 `RobotObservation` 中并行数组槽位
-  - act_exp1_1 / act_exp1_3 / pi05_exp1_3_lora：`{prefix}_camera_id` 与 `{prefix}_depth_camera_id`（深度可与 RGB 不同路）
-  - act_exp3_0：`act_exp3_0_camera_ids` / `act_exp3_0_depth_camera_ids` 与 `act_exp3_0_image_keys` / `act_exp3_0_depth_keys` 一一对应（默认 cam1/cam3/cam4）
-  - act_exp3_0_det：同 `act_exp3_0`，并增加 `act_exp3_0_det_detector_*` 参数（RT-DETRv4 仓库/权重/相机/标定/阈值）
-  - act_exp3_5_det：同 `act_exp3_0_det` 检测参数（前缀 `act_exp3_5_det_*`），动作为 7 关节 + 手二值 → `ArmAction.joint_position`
-  - act_exp3_1：`act_exp3_1_camera_ids` / `act_exp3_1_depth_camera_ids` 与 `act_exp3_1_image_keys` / `act_exp3_1_depth_keys` 一一对应（默认 cam1/cam3/cam4）
-  - act_exp3_2：`act_exp3_2_camera_ids` / `act_exp3_2_depth_camera_ids` 与 `act_exp3_2_image_keys` / `act_exp3_2_depth_keys` 一一对应（默认 cam1/cam3/cam4）
-  - act_exp1_2：`act_exp1_2_camera_id`（仅 RGB）
+- 订阅 `observation_topic`，默认 `/robot/observation`，消息类型为
+  `robot_interfaces/msg/RobotObservation`。
+- 发布 `whole_body_action_topic`，默认 `/robot/whole_body_action`，消息类型为
+  `robot_interfaces/msg/WholeBodyAction`。
+- `require_observation_before_publish=true` 时，收到第一条观测前不会发布动作。
 
-## 主要参数
+## act_exp3_0 数据约定
 
-- 策略与节拍
-  - `policy_type`：`dummy|act|bc|vla`
-  - `publish_rate_hz`（dummy）：动作发布频率
-  - `act_control_hz`（act）：ACT 推理频率
-  - `require_observation_before_publish`：是否等待观测
-- 输出话题
-  - `observation_topic`
-  - `whole_body_action_topic`
-- dummy 输出动作（可用于链路调试）
-  - `arm_control_mode`、`hand_control_mode`
-  - `is_relative`
-  - `arm_reference_frame`
-  - `arm_joint_position`、`arm_joint_velocity`
-  - `hand_joint_position`、`hand_joint_velocity`
-  - `arm_duration_sec`、`hand_duration_sec`
+- `observation.state`：8 维，内容为 `ee_pose(7) + hand_grasp_binary(1)`。
+- `action`：8 维，内容为 `ee_pose(7) + hand_grasp_binary(1)`。
+- 图像：默认使用 `cam1`、`cam3`、`cam4` 三路 RGB 和深度。
+- 输出：机械臂使用绝对笛卡尔位姿，手部根据阈值输出 reset 或 grasp 模板。
+
+模型参数集中在 `config/act_exp3_0_policy.yaml`：
+
+- `act_exp3_0_checkpoint_dir`：LeRobot `pretrained_model` 目录。
+- `act_exp3_0_device`：`auto`、`cpu` 或 `cuda`。
+- `act_exp3_0_camera_ids` / `act_exp3_0_image_keys`：RGB 相机与模型输入键，数量必须一致。
+- `act_exp3_0_depth_camera_ids` / `act_exp3_0_depth_keys`：深度相机与模型输入键，启用深度时数量必须与 RGB 一致。
+- `act_exp3_0_control_hz`：策略推理频率。
+- `act_exp3_0_state_dim` / `act_exp3_0_action_dim`：默认均为 8。
+
+使用前请确认 checkpoint 路径、相机 ID、图像键和训练数据保持一致。
 
 ## 构建
 
-请使用工作区内的虚拟环境（与 `torch` / `lerobot` 一致）：
+使用工作区内包含 `torch` 和 `lerobot` 依赖的虚拟环境：
 
 ```bash
 cd ~/ws_franka_inspire
 source .venv/bin/activate
 source /opt/ros/humble/setup.bash
-colcon build --packages-select policy_manager
+.venv/bin/python -m colcon build --packages-select policy_manager
 source install/setup.bash
 ```
 
-说明：`policy_manager_node` 由该 venv 的 Python 解释器运行（通过 `colcon` 安装后的入口脚本），开发时请在同一 venv 下 `colcon build`，避免系统 Python 缺依赖。
+必须通过 `.venv` 的 Python 启动 `colcon`，否则生成的 ROS 入口脚本可能使用系统
+Python，运行模型时会找不到 `torch` / `lerobot`。
 
-## 使用方法
+## 运行
 
-### 1) 直接运行（默认参数）
-
-```bash
-ros2 run policy_manager policy_manager_node
-```
-
-### 2) 在 YAML 里改 policy_type（推荐）
-
-在 `robot_bringup/config/real_policy_execute.yaml` 中修改：
-
-```yaml
-policy_manager:
-  ros__parameters:
-    policy_type: act   # 或 dummy
-```
-
-`real_policy_execute.launch.py` 默认 `policy_params_file:=auto`，会按该 `policy_type` 自动选择：
-
-- `dummy` -> `policy_manager/config/dummy_policy.yaml`
-- `act` -> `policy_manager/config/act_policy.yaml`
-
-### 3) 手动指定模型 YAML（可选）
-
-默认会加载 `policy_manager/config/dummy_policy.yaml`。切到 ACT 示例：
-
-```bash
-ros2 launch robot_bringup real_policy_execute.launch.py \
-  policy_params_file:=/home/jhr/ws_franka_inspire/src/policy_manager/config/act_policy.yaml
-```
-
-### 4) CLI 方式覆盖参数（可选）
+直接运行节点时默认使用 `dummy`：
 
 ```bash
 ros2 run policy_manager policy_manager_node --ros-args \
-  -p policy_type:=dummy \
-  -p publish_rate_hz:=10.0 \
-  -p observation_topic:=/robot/observation \
-  -p whole_body_action_topic:=/robot/whole_body_action \
-  -p arm_control_mode:=0 \
-  -p hand_control_mode:=0 \
-  -p is_relative:=false \
-  -p arm_joint_position:="[0.0,-0.6,0.0,-2.0,0.0,1.5,0.7]" \
-  -p hand_joint_position:="[0.0,0.0,0.0,0.0,0.0,0.0]"
+  --params-file src/policy_manager/config/dummy_policy.yaml
+```
+
+运行 `act_exp3_0`：
+
+```bash
+ros2 run policy_manager policy_manager_node --ros-args \
+  --params-file src/policy_manager/config/act_exp3_0_policy.yaml
+```
+
+运行完整真实机器人 pipeline：
+
+```bash
+ros2 launch robot_bringup real_policy_execute.launch.py
+```
+
+`real_policy_execute.yaml` 默认选择 `act_exp3_0`。当
+`policy_params_file:=auto` 时，launch 文件会根据 `policy_type` 自动加载
+`policy_manager/config/{policy_type}_policy.yaml`。切换到 `dummy` 时，只需将 pipeline
+配置中的 `policy_type` 改为 `dummy`。
+
+也可以手动指定策略配置：
+
+```bash
+ros2 launch robot_bringup real_policy_execute.launch.py \
+  policy_params_file:=/home/jhr/ws_franka_inspire/src/policy_manager/config/act_exp3_0_policy.yaml
 ```
 
 ## 联调建议
 
-- 配合 `observation_aggregator` 与 `action_router` 一起启动
-- 先 `ros2 topic echo /robot/whole_body_action` 确认策略输出正常
-- 再检查 `action_router` 输出是否符合预期（相对/绝对与限幅）
+- 确认 `observation_aggregator` 发布的相机顺序和配置中的 camera ID 一致。
+- 先检查 `/robot/observation` 是否完整，再观察 `/robot/whole_body_action`。
+- 最后检查 `action_router` 输出的机械臂和手部动作是否符合预期。

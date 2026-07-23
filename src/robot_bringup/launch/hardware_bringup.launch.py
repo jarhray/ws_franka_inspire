@@ -145,7 +145,7 @@ def _row_to_rs_launch_args(
     if serial is None or str(serial).strip() == "":
         raise RuntimeError(f"Camera {cid!r}: missing serial_no in realsense_cameras yaml")
 
-    ns = str(row.get("camera_namespace", cid)).strip() or cid
+    ns = str(row.get("camera_namespace", "camera")).strip()
 
     out: Dict[str, str] = {
         "camera_name": cid,
@@ -230,6 +230,9 @@ def generate_launch_description() -> LaunchDescription:
     # ----- FR3 executor (franky) -----
     robot_ip = LaunchConfiguration("robot_ip")
     inspire_mode = LaunchConfiguration("inspire_mode")
+    inspire_publish_rate = LaunchConfiguration("inspire_publish_rate")
+    inspire_spacename = LaunchConfiguration("inspire_spacename")
+    inspire_name = LaunchConfiguration("inspire_name")
 
     inspire_launch = os.path.join(
         get_package_share_directory("inspire_hand_modbus_ros2"),
@@ -274,6 +277,21 @@ def generate_launch_description() -> LaunchDescription:
                 default_value="2",
                 description="Inspire control.launch mode: 1=control only, 2=control + angle/topic publisher.",
             ),
+            DeclareLaunchArgument(
+                "inspire_publish_rate",
+                default_value="10.0",
+                description="Inspire state topic publish rate in Hz.",
+            ),
+            DeclareLaunchArgument(
+                "inspire_spacename",
+                default_value="inspire",
+                description="Inspire topic space prefix; use an empty value to disable it.",
+            ),
+            DeclareLaunchArgument(
+                "inspire_name",
+                default_value="hand1",
+                description="Inspire hand name prefix; use an empty value to disable it.",
+            ),
             OpaqueFunction(function=_launch_realsense_cameras),
             Node(
                 package="fr3_franky_executor",
@@ -286,6 +304,9 @@ def generate_launch_description() -> LaunchDescription:
                 PythonLaunchDescriptionSource([inspire_launch]),
                 launch_arguments={
                     "mode": inspire_mode,
+                    "publish_rate": inspire_publish_rate,
+                    "spacename": inspire_spacename,
+                    "name": inspire_name,
                 }.items(),
             ),
         ]

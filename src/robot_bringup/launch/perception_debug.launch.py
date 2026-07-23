@@ -16,7 +16,7 @@ def _build_debug_nodes(context, *args, **kwargs):
     enabled_cameras = LaunchConfiguration('enabled_cameras').perform(context).strip()
     obs_parameters = [params_file_path]
     if enabled_cameras:
-        obs_parameters.append({'ros__parameters': {'enabled_cameras': enabled_cameras}})
+        obs_parameters.append({'enabled_cameras': enabled_cameras})
 
     return [
         Node(

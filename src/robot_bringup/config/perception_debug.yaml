@@ -4,11 +4,12 @@ observation_aggregator:
     publish_rate_hz: 30.0
     default_camera_id: cam1
     enabled_cameras: "cam1"
+    realsense_camera_namespace: camera
     rs_rgb_image_topic: /camera/color/image_raw
     rs_depth_image_topic: /camera/depth/image_rect_raw
     rs_camera_info_topic: /camera/color/camera_info
-    hand_angle_topic: /angle_data
-    hand_touch_topic: /touch_data
+    hand_angle_topic: /inspire/hand1/angle_data
+    hand_touch_topic: /inspire/hand1/touch_data
     hand_finger_id_order: [0, 1, 2, 3, 4, 5]
     franka_namespace: ""
     franka_state_controller_name: franka_robot_state_broadcaster

@@ -9,8 +9,11 @@ geometry_msgs/Pose ee_pose
 geometry_msgs/Twist ee_twist
 
 # Hand (Inspire) joint state, following a fixed joint order defined by the system.
+# `hand_joint_position` is in radians; `hand_joint_hardware_position` preserves
+# the raw hardware k values (normally 0-1000) in the same order.
 float64[] hand_joint_position
 float64[] hand_joint_velocity
+float64[] hand_joint_hardware_position
 
 # Inspire tactile: normal/tangential forces per finger (same layout as GetTouchAct1.msg).
 service_interfaces/GetTouchAct1 hand_touch
